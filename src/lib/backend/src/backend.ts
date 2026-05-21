@@ -23,6 +23,7 @@ import {
 import { ExternalRuntimeAdapter, LeRobotAdapter, parseRobotCommand, type PhysProtocolAdapter } from "./protocolAdapters";
 import { poseToJson } from "./rapierPhysics";
 import { Chem0Store, DEFAULT_PHYSICAL_WORLD_ID } from "./store";
+import type { AerialControlCommand } from "./physics";
 import type { AssetFormat, AssetKind, AssetManifest, Experiment, JsonObject, JsonValue, PhysEntity, Protocol, RobotEmbodiment, RobotKind, WorldType } from "./types";
 
 const DEFAULT_MODEL = "gpt-5.5";
@@ -51,6 +52,7 @@ type SimWorkerResponse = {
   step_count: number;
   snapshot?: {
     poses?: Record<string, { position: [number, number, number]; orientation: [number, number, number, number] }>;
+    velocities?: Record<string, { linear: [number, number, number]; angular: [number, number, number] }>;
     contacts?: Array<{ a: string; b: string }>;
   };
 };
@@ -445,6 +447,9 @@ export class Chem0Backend extends EventEmitter {
       return {
         sessions: Array.from(this.simSessions.values()).map((session) => this.simSessionPayload(session, session.lastSnapshot)) as unknown as JsonObject[]
       };
+    }
+    if (name === "set_aerial_control") {
+      return this.setAerialControl(args);
     }
     if (name === "connect_controller") {
       const protocol = requireEnum(args.protocol ?? "none", PROTOCOLS, "protocol");
@@ -887,12 +892,24 @@ export class Chem0Backend extends EventEmitter {
   }
 
   private async dispatchCommand(entityId: string, command: ReturnType<typeof parseRobotCommand>): Promise<unknown> {
+    const simResult = await this.dispatchAerialCommandToSim(entityId, command);
+    if (simResult) return simResult;
     const controllers = this.store.listEntityControllers(entityId);
     const protocol = controllers[0]?.protocol ?? (this.store.getWorldEntity(entityId)?.state.controller as Protocol | undefined) ?? "none";
     const adapter = this.adapters.get(protocol);
     if (!adapter) throw new Error(`No adapter registered for protocol: ${protocol}`);
     if (!adapter.supports(command.type)) throw new Error(`${protocol} adapter does not support command ${command.type}.`);
     return adapter.command(entityId, command);
+  }
+
+  private async dispatchAerialCommandToSim(entityId: string, command: ReturnType<typeof parseRobotCommand>): Promise<unknown | null> {
+    const control = this.aerialControlFromCommand(command);
+    if (!control) return null;
+    const entity = this.store.getWorldEntity(entityId);
+    if (!entity) throw new Error(`Unknown entity_id: ${entityId}`);
+    const session = Array.from(this.simSessions.values()).find((item) => item.worldId === entity.world_id && item.status === "running");
+    if (!session) return null;
+    return this.sendSimAerialControl(session, entityId, control);
   }
 
   private async readAdapterState(entityId: string): Promise<JsonValue> {
@@ -946,6 +963,25 @@ export class Chem0Backend extends EventEmitter {
     return this.simSessionPayload(session, result);
   }
 
+  private async setAerialControl(args: JsonObject): Promise<JsonObject> {
+    const entityId = String(args.entity_id ?? "").trim();
+    if (!entityId) throw new Error("set_aerial_control requires entity_id.");
+    const entity = this.store.getWorldEntity(entityId);
+    if (!entity) throw new Error(`Unknown entity_id: ${entityId}`);
+    const session = this.resolveSimSession({ ...args, world_id: args.world_id ?? entity.world_id });
+    if (session.status !== "running") throw new Error(`Simulation session is not running: ${session.id}`);
+    const control = this.aerialControlFromArgs(args);
+    const result = await this.sendSimAerialControl(session, entityId, control);
+    const intervention = this.store.recordIntervention({
+      worldId: entity.world_id,
+      targetIds: [entity.id],
+      kind: "robot_command",
+      payload: control as unknown as JsonValue,
+      metadata: { tool: "set_aerial_control", simulator: "rapier" }
+    });
+    return { ...result, intervention: intervention as unknown as JsonObject };
+  }
+
   private async stepSim(args: JsonObject): Promise<JsonObject> {
     const session = this.resolveSimSession(args);
     if (session.status !== "running") throw new Error(`Simulation session is not running: ${session.id}`);
@@ -967,6 +1003,61 @@ export class Chem0Backend extends EventEmitter {
     session.lastSnapshot = snapshot;
     this.recordSimLifecycle(session.worldId, "pause_sim", session, snapshot);
     return this.simSessionPayload(session, snapshot);
+  }
+
+  private async sendSimAerialControl(session: SimSession, entityId: string, control: AerialControlCommand): Promise<JsonObject> {
+    const result = await this.sendSimRequest(session, { op: "control", entityId, control });
+    session.lastSnapshot = result;
+    session.updatedAt = new Date().toISOString();
+    const entity = this.store.getWorldEntity(entityId);
+    if (entity) {
+      this.store.updateWorldEntity({
+        entityId,
+        state: { ...entity.state, aerial_control: control as unknown as JsonValue, sim: { seed: result.seed, step_count: result.step_count, elapsed_s: result.elapsed_s } }
+      });
+    }
+    return this.simSessionPayload(session, result);
+  }
+
+  private aerialControlFromCommand(command: ReturnType<typeof parseRobotCommand>): AerialControlCommand | null {
+    if (command.type === "mavlink_takeoff") return { mode: "takeoff", targetAltitudeM: command.altitudeM };
+    if (command.type === "mavlink_land") return { mode: "land", targetAltitudeM: 0.06 };
+    if (command.type === "mavlink_goto") {
+      const local = command.localPose && typeof command.localPose === "object" && !Array.isArray(command.localPose) ? command.localPose : {};
+      return {
+        mode: "goto",
+        targetAltitudeM: Number(command.alt ?? local.z ?? 1),
+        targetPosition: [Number(local.x ?? 0), Number(local.y ?? 0), Number(command.alt ?? local.z ?? 1)]
+      };
+    }
+    if (command.type === "aerial_control") {
+      return {
+        mode: command.mode,
+        thrustN: command.thrustN,
+        targetAltitudeM: command.targetAltitudeM,
+        targetPosition: command.targetPosition,
+        yawRateRadS: command.yawRateRadS
+      };
+    }
+    return null;
+  }
+
+  private aerialControlFromArgs(args: JsonObject): AerialControlCommand {
+    const mode = String(args.mode ?? "hover") as AerialControlCommand["mode"];
+    if (!["idle", "thrust", "hover", "takeoff", "land", "goto"].includes(mode)) throw new Error("Invalid aerial control mode.");
+    const targetPosition = Array.isArray(args.target_position)
+      ? [Number(args.target_position[0] ?? 0), Number(args.target_position[1] ?? 0), Number(args.target_position[2] ?? 0)] as [number, number, number]
+      : undefined;
+    return {
+      mode,
+      thrustN: numberArg(args.thrust_n),
+      targetAltitudeM: numberArg(args.target_altitude_m),
+      targetPosition,
+      yawRateRadS: numberArg(args.yaw_rate_rad_s),
+      torqueNm: Array.isArray(args.torque_nm)
+        ? [Number(args.torque_nm[0] ?? 0), Number(args.torque_nm[1] ?? 0), Number(args.torque_nm[2] ?? 0)]
+        : undefined
+    };
   }
 
   private async resumeSim(args: JsonObject): Promise<JsonObject> {
@@ -1654,6 +1745,26 @@ export class Chem0Backend extends EventEmitter {
         }
       },
       {
+        name: "set_aerial_control",
+        description: "Set force-based aerial control for a simulated drone entity in a running simulation session.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            entity_id: { type: "string" },
+            world_id: { type: "string" },
+            session_id: { type: "string" },
+            mode: { type: "string", enum: ["idle", "thrust", "hover", "takeoff", "land", "goto"] },
+            thrust_n: { type: "number" },
+            target_altitude_m: { type: "number" },
+            target_position: { type: "array", items: { type: "number" }, minItems: 3, maxItems: 3 },
+            yaw_rate_rad_s: { type: "number" },
+            torque_nm: { type: "array", items: { type: "number" }, minItems: 3, maxItems: 3 }
+          },
+          required: ["entity_id", "mode"],
+          additionalProperties: false
+        }
+      },
+      {
         name: "list_agent_session_events",
         description: "List logged agent session events for an experiment.",
         inputSchema: {
@@ -1798,4 +1909,9 @@ export class Chem0Backend extends EventEmitter {
     }
     return {};
   }
+}
+
+function numberArg(value: unknown): number | undefined {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }

@@ -4,6 +4,8 @@ export {
   physicsBodyTypeForEntity,
   regimesForPhysicsKind,
   seedFromString,
+  type AerialControlCommand,
+  type AerialControlMode,
   type PhysicsBodyDescriptor,
   type PhysicsBodyType,
   type PhysicsColliderShape,

@@ -25,7 +25,19 @@ export interface PhysicsBodyDescriptor {
 
 export interface PhysicsStepResult {
   poses: Record<string, PhysicsPose>;
+  velocities?: Record<string, { linear: Vec3; angular: Vec3 }>;
   contacts: Array<{ a: string; b: string }>;
+}
+
+export type AerialControlMode = "idle" | "thrust" | "hover" | "takeoff" | "land" | "goto";
+
+export interface AerialControlCommand {
+  mode: AerialControlMode;
+  thrustN?: number;
+  targetAltitudeM?: number;
+  targetPosition?: Vec3;
+  yawRateRadS?: number;
+  torqueNm?: Vec3;
 }
 
 export interface PhysicsWorldRuntime {

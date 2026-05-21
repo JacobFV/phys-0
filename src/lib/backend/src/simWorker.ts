@@ -1,11 +1,12 @@
 import { parentPort } from "node:worker_threads";
 import type { JsonObject, PhysEntity } from "./types";
-import { normalizeSeed } from "./physics";
+import { normalizeSeed, type AerialControlCommand } from "./physics";
 import { initRapier, physicsBodyFromEntity, RapierPhysicsWorldRuntime } from "./rapierPhysics";
 
 type WorkerRequest =
   | { id: number; op: "init"; worldId: string; seed?: number; fixedTimeStepS?: number; entities: PhysEntity[] }
   | { id: number; op: "reset"; seed?: number; entities: PhysEntity[] }
+  | { id: number; op: "control"; entityId: string; control: AerialControlCommand }
   | { id: number; op: "step"; dtS?: number; kinematicPoses?: Record<string, JsonObject> }
   | { id: number; op: "snapshot" }
   | { id: number; op: "destroy" };
@@ -46,6 +47,10 @@ async function handle(message: WorkerRequest): Promise<unknown> {
     return status(runtime?.snapshot());
   }
   if (!runtime) throw new Error("Worker is not initialized.");
+  if (message.op === "control") {
+    runtime.setAerialControl(message.entityId, message.control);
+    return status(runtime.snapshot());
+  }
   if (message.op === "step") {
     const dtS = message.dtS && message.dtS > 0 ? message.dtS : fixedTimeStepS;
     const snapshot = runtime.step(dtS);

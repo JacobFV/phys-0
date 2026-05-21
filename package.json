@@ -18,6 +18,7 @@
     "electron:watch": "npm --workspace @chem0/electron run watch",
     "calibrate:so101": "PYTHONPATH=src/lib .venv/bin/python scripts/calibrate_so101_deterministic.py",
     "smoke:multi-world-sim": "node scripts/smoke_multi_world_sim.js",
+    "smoke:aerial-dynamics": "node scripts/smoke_aerial_dynamics.js",
     "build": "npm run backend:build && npm run mcp:build && npm run electron:build && npm run phys0:build"
   },
   "devDependencies": {

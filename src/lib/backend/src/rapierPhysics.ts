@@ -9,7 +9,8 @@ import {
   type PhysicsPose,
   type PhysicsRuntimeFactory,
   type PhysicsStepResult,
-  type PhysicsWorldRuntime
+  type PhysicsWorldRuntime,
+  type AerialControlCommand
 } from "./physics";
 
 const DEFAULT_TIMESTEP_S = 1 / 60;
@@ -19,6 +20,7 @@ type BodyRecord = {
   descriptor: PhysicsBodyDescriptor;
   body: RigidBody;
   collider: Collider;
+  aerialControl?: AerialControlCommand;
 };
 
 let rapierReady: Promise<void> | null = null;
@@ -86,20 +88,35 @@ export class RapierPhysicsWorldRuntime implements PhysicsWorldRuntime {
     }
   }
 
+  setAerialControl(id: string, control: AerialControlCommand): void {
+    const record = this.bodies.get(id);
+    if (!record) throw new Error(`Unknown physics body: ${id}`);
+    record.aerialControl = control;
+    if (control.mode === "idle") {
+      record.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      record.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    }
+  }
+
   step(dtS = this.fixedTimeStepS): PhysicsStepResult {
     this.world.integrationParameters.dt = dtS > 0 ? dtS : this.fixedTimeStepS;
+    this.applyAerialControls(dtS);
     this.world.step();
     return this.snapshot();
   }
 
   snapshot(): PhysicsStepResult {
     const poses: Record<string, PhysicsPose> = {};
+    const velocities: Record<string, { linear: Vec3; angular: Vec3 }> = {};
     const contacts: Array<{ a: string; b: string }> = [];
     const seenContacts = new Set<string>();
     for (const [id, record] of Array.from(this.bodies.entries()).sort(([a], [b]) => a.localeCompare(b))) {
       const t = record.body.translation();
       const r = record.body.rotation();
+      const linvel = record.body.linvel();
+      const angvel = record.body.angvel();
       poses[id] = { position: [t.x, t.y, t.z], orientation: [r.x, r.y, r.z, r.w] };
+      velocities[id] = { linear: [linvel.x, linvel.y, linvel.z], angular: [angvel.x, angvel.y, angvel.z] };
       this.world.contactPairsWith(record.collider, (other) => {
         const otherId = this.colliderToBody.get(other.handle);
         if (!otherId || otherId === id) return;
@@ -109,7 +126,44 @@ export class RapierPhysicsWorldRuntime implements PhysicsWorldRuntime {
         contacts.push({ a: id < otherId ? id : otherId, b: id < otherId ? otherId : id });
       });
     }
-    return { poses, contacts };
+    return { poses, velocities, contacts };
+  }
+
+  private applyAerialControls(dtS: number): void {
+    for (const record of this.bodies.values()) {
+      const control = record.aerialControl;
+      if (!control || control.mode === "idle" || !isAerialDescriptor(record.descriptor)) continue;
+      const body = record.body;
+      const mass = Math.max(0.001, body.mass());
+      const translation = body.translation();
+      const linvel = body.linvel();
+      let force = { x: 0, y: 0, z: 0 };
+      if (control.mode === "thrust") {
+        force.z = Number(control.thrustN ?? 0);
+      } else {
+        const target = control.mode === "land" ? 0.06 : Number(control.targetAltitudeM ?? control.targetPosition?.[2] ?? translation.z);
+        const error = target - translation.z;
+        const kp = Number(record.descriptor.metadata?.aerial_kp ?? 18);
+        const kd = Number(record.descriptor.metadata?.aerial_kd ?? 7);
+        force.z = mass * (9.81 + kp * error - kd * linvel.z);
+        if (control.mode === "goto" && control.targetPosition) {
+          const xyKp = Number(record.descriptor.metadata?.aerial_xy_kp ?? 4);
+          const xyKd = Number(record.descriptor.metadata?.aerial_xy_kd ?? 2);
+          force.x = mass * (xyKp * (control.targetPosition[0] - translation.x) - xyKd * linvel.x);
+          force.y = mass * (xyKp * (control.targetPosition[1] - translation.y) - xyKd * linvel.y);
+        }
+      }
+      body.addForce(force, true);
+      if (control.torqueNm) body.addTorque(vec(control.torqueNm), true);
+      if (control.yawRateRadS != null) {
+        const angvel = body.angvel();
+        body.setAngvel({ x: angvel.x, y: angvel.y, z: control.yawRateRadS }, true);
+      }
+      if (control.mode === "land" && translation.z <= 0.07 && Math.abs(linvel.z) < 0.08) {
+        record.aerialControl = { mode: "idle" };
+        body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      }
+    }
   }
 
   private bodyDesc(descriptor: PhysicsBodyDescriptor): RAPIER.RigidBodyDesc {
@@ -146,13 +200,25 @@ export function physicsBodyFromEntity(entity: PhysEntity): PhysicsBodyDescriptor
   const source = { ...entity.metadata, ...entity.state };
   return {
     id: entity.id,
-    bodyType: physicsBodyTypeForEntity(entity),
+    bodyType: isDroneEntity(entity) ? "dynamic" : physicsBodyTypeForEntity(entity),
     pose,
     collider: colliderFromJson(source),
     massKg: numberOrUndefined(source.mass_kg),
     gravityScale: numberOrUndefined(source.gravity_scale),
-    metadata: entity.metadata
+    metadata: source
   };
+}
+
+export function isDroneEntity(entity: Pick<PhysEntity, "asset_id" | "state" | "metadata">): boolean {
+  return entity.asset_id === "px4/x500" ||
+    entity.state?.embodiment === "drone" ||
+    entity.metadata?.embodiment === "drone" ||
+    entity.state?.controller === "mavlink" ||
+    entity.metadata?.controller === "mavlink";
+}
+
+function isAerialDescriptor(descriptor: PhysicsBodyDescriptor): boolean {
+  return descriptor.metadata?.embodiment === "drone" || descriptor.metadata?.controller === "mavlink" || descriptor.id.includes("drone");
 }
 
 export function poseToJson(pose: PhysicsPose): JsonObject {
