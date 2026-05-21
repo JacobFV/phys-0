@@ -1,0 +1,32 @@
+{
+  "id": "px4/x500",
+  "name": "PX4 X500",
+  "kind": "robot",
+  "embodiment": "drone",
+  "source": {
+    "name": "PX4 Gazebo Models",
+    "upstreamRepo": "https://github.com/PX4/PX4-gazebo-models",
+    "vendorMaintained": true,
+    "notes": "P0 drone source record. Requires SDF/Gazebo import, MAVLink SITL, arm, takeoff-hover-land validation."
+  },
+  "quality": "vendor_raw",
+  "formats": ["sdf"],
+  "variants": {
+    "external_source": {
+      "descriptionPath": "docs/phys0-external-assets.md",
+      "descriptionFormat": "sdf",
+      "meshRoots": [],
+      "defaultFrame": "base_link",
+      "baseLink": "base_link",
+      "defaultController": "mavlink",
+      "simBackends": ["gazebo"]
+    }
+  },
+  "protocols": ["gazebo", "mavlink"],
+  "patches": [],
+  "validation": {
+    "status": "failing",
+    "tests": ["xml_parse", "mesh_resolve", "bbox", "sim_spawn", "mavlink_connect", "sitl_arm", "sitl_takeoff_hover_land"],
+    "failures": ["Source record only; upstream SDF/model files and PX4 SITL validation have not been committed in this repository."]
+  }
+}

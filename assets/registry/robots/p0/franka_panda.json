@@ -1,0 +1,33 @@
+{
+  "id": "franka/panda",
+  "name": "Franka Emika Panda",
+  "kind": "robot",
+  "embodiment": "manipulator",
+  "source": {
+    "name": "frankarobotics/franka_description",
+    "upstreamRepo": "https://github.com/frankarobotics/franka_description",
+    "vendorMaintained": true,
+    "notes": "P0 source record. Upstream files are not yet canonicalized or committed in phys-0."
+  },
+  "quality": "vendor_raw",
+  "formats": ["urdf", "xacro"],
+  "variants": {
+    "external_source": {
+      "descriptionPath": "docs/phys0-external-assets.md",
+      "descriptionFormat": "urdf",
+      "meshRoots": [],
+      "defaultFrame": "panda_link0",
+      "baseLink": "panda_link0",
+      "endEffectorFrame": "panda_hand",
+      "defaultController": "ros2_control",
+      "simBackends": ["gazebo", "mujoco"]
+    }
+  },
+  "protocols": ["ros2", "ros2_control", "gazebo", "mujoco"],
+  "patches": [],
+  "validation": {
+    "status": "failing",
+    "tests": ["xml_parse", "mesh_resolve", "joint_limits", "fk", "bbox", "collision_exists", "inertials_sane", "sim_spawn"],
+    "failures": ["Source record only; upstream files have not been imported, patched, or validated in this repository."]
+  }
+}

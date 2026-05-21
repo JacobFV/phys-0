@@ -5,16 +5,19 @@
   "workspaces": [
     "src/lib/backend",
     "src/apps/mcp-node",
-    "src/apps/electron"
+    "src/apps/electron",
+    "src/apps/phys0-cli"
   ],
   "scripts": {
     "backend:build": "npm --workspace @chem0/backend run build",
     "mcp:build": "npm --workspace @chem0/mcp run build",
     "electron:build": "npm --workspace @chem0/electron run build",
+    "phys0:build": "npm --workspace @phys0/cli run build",
+    "phys0": "npm --workspace @phys0/cli exec phys0 --",
     "electron:dev": "npm --workspace @chem0/electron run dev",
     "electron:watch": "npm --workspace @chem0/electron run watch",
     "calibrate:so101": "PYTHONPATH=src/lib .venv/bin/python scripts/calibrate_so101_deterministic.py",
-    "build": "npm run backend:build && npm run mcp:build && npm run electron:build"
+    "build": "npm run backend:build && npm run mcp:build && npm run electron:build && npm run phys0:build"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0"

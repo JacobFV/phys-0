@@ -397,31 +397,6 @@ button.primary:focus-visible { box-shadow: 0 0 0 3px rgba(var(--glow-rgb), 0.28)
   font-family: var(--font-mono);
 }
 
-.ph-panel {
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
-.ph-graph {
-  flex: 1;
-  min-height: 0;
-  position: relative;
-  border: 1px solid var(--border-1);
-  border-radius: var(--r-sm);
-  background:
-    linear-gradient(180deg, rgba(var(--glow-rgb), 0.03), transparent 40%),
-    var(--bg-0);
-  overflow: hidden;
-}
-
-.ph-graph canvas {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-
 .small-panel {
   flex: 0 0 200px;
   min-height: 0;
@@ -968,6 +943,50 @@ pre::-webkit-scrollbar-thumb,
   background: var(--bg-0);
 }
 
+/* Row 1: pure OS title bar. The only -webkit-app-region: drag surface, so
+   window controls (macOS traffic lights / Windows-Linux overlay) own their
+   native corner and never compete with the functional toolbar below it. */
+.titlebar {
+  flex: 0 0 auto;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-0);
+  border-bottom: 1px solid var(--border-1);
+  -webkit-app-region: drag;
+  position: relative;
+  z-index: 60;
+}
+
+.titlebar-title {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Row 2: functional toolbar. Not a drag surface and full-width on every OS,
+   so it needs no platform-specific padding for window chrome. */
+.toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  height: 36px;
+  padding: 0;
+  gap: 0;
+  background: var(--bg-0);
+  border-bottom: 1px solid var(--border-2);
+  position: relative;
+  z-index: 50;
+}
+
+/* Single-bar appbar retained for the auxiliary windows (settings, workbench,
+   virtual world) — only the main window uses the .titlebar/.toolbar split. */
 .appbar {
   flex: 0 0 auto;
   display: flex;
@@ -1417,26 +1436,21 @@ body.platform-linux .appbar { padding-left: 0; padding-right: 140px; }
   background: var(--bg-0);
 }
 
-.main-area .panel {
-  flex: 1 1 auto;
-  min-height: 0;
-  border: none;
-  border-radius: 0;
-  padding: 0;
-  background: var(--bg-0);
-  box-shadow: none;
-}
-
-.main-area .panel .panel-head {
+/* metrics dashboard: a tiled grid of graph panels, one per pinned metric.
+   panels are added/removed by pinning from the right-hand Metrics catalog. */
+.metrics-head {
+  display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex: 0 0 auto;
   height: var(--workspace-head-height);
   padding: 8px 16px;
   border-bottom: 1px solid var(--border-1);
   background: var(--bg-0);
-  margin-bottom: 0;
 }
 
-.main-area .panel .panel-head h2 {
+.metrics-head h2 {
   font-family: var(--font-mono);
   font-size: 10px;
   line-height: 1;
@@ -1445,11 +1459,278 @@ body.platform-linux .appbar { padding-left: 0; padding-right: 140px; }
   font-weight: 500;
 }
 
-.main-area .ph-graph {
-  border: none;
-  border-radius: 0;
+.metric-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-auto-rows: 240px;
+  gap: 12px;
+  padding: 12px;
+  align-content: start;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-2) transparent;
+}
+
+.metric-grid::-webkit-scrollbar { width: 6px; }
+.metric-grid::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 0; }
+
+.metric-grid-empty {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+  padding: 0 24px;
+  text-align: center;
+  color: var(--text-4);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.metric-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--border-1);
   background: var(--bg-0);
 }
+
+.metric-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 6px 6px 6px 12px;
+  border-bottom: 1px solid var(--border-1);
+  background: var(--bg-1);
+}
+
+.metric-card-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+.metric-card-value {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--accent);
+}
+
+.metric-unpin {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-4);
+  cursor: pointer;
+}
+
+.metric-unpin:hover { color: var(--text-1); background: var(--bg-2); }
+
+.metric-card-graph {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}
+
+.metric-card-graph canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* right-hand Metrics catalog: every tracked metric with a sparkline and a
+   pin toggle that adds/removes its panel from the main graph grid. */
+.metric-catalog {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.metric-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-1);
+}
+
+.metric-pin {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-4);
+  cursor: pointer;
+}
+
+.metric-pin:hover { color: var(--text-2); }
+.metric-pin.pinned { color: var(--accent); }
+
+.metric-row-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.metric-row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--text-1);
+}
+
+.metric-spark {
+  width: 100%;
+  height: 22px;
+  display: block;
+}
+
+.metric-row-value {
+  flex: 0 0 auto;
+  min-width: 50px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent);
+}
+
+.metric-logs-section { gap: 6px; }
+
+.metric-logs-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-4);
+}
+
+.metric-logs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.metric-log-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border-1);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-2);
+}
+
+.metric-log-row:last-child { border-bottom: none; }
+.metric-log-time { color: var(--text-4); }
+.metric-log-name { color: var(--text-3); }
+.metric-log-msg { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.metric-log-row.level-error .metric-log-msg { color: var(--danger); }
+.metric-log-row.level-warn .metric-log-msg { color: var(--accent); }
+
+/* Row 4: action + status bar. Houses the mode actions moved off the toolbar
+   (record / train / replay / calibrate) plus a live status line. */
+.statusbar {
+  flex: 0 0 auto;
+  height: 30px;
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  background: var(--bg-1);
+  border-top: 1px solid var(--border-2);
+  z-index: 40;
+}
+
+.statusbar-group {
+  display: flex;
+  align-items: stretch;
+}
+
+.status-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  padding: 0 12px;
+  border: none;
+  border-right: 1px solid var(--border-1);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.status-btn:hover { background: var(--bg-2); color: var(--text-1); }
+.status-btn svg { flex: 0 0 auto; }
+
+.statusbar-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+  min-width: 0;
+}
+
+.statusbar-status #status-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--danger);
+  animation: round-pulse 1.2s ease-in-out infinite;
+}
+
+.status-dot[hidden] { display: none; }
 
 button.ghost.mini {
   min-height: 22px;
@@ -2294,4 +2575,64 @@ body.workbench-detached .appbar-group.left .tab-btn { border-right: none; }
   pointer-events: none;
   white-space: nowrap;
   box-shadow: 0 1px 0 var(--bg-0);
+}
+
+.asset-list .asset-card {
+  align-items: stretch;
+  gap: 3px;
+}
+
+.asset-detail {
+  font-family: var(--font-mono);
+  color: var(--text-4);
+}
+
+.process-graph {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(150px, 1fr));
+  gap: 8px;
+  padding: 10px;
+  border-bottom: 1px solid var(--border-1);
+  background: var(--bg-1);
+  min-height: 130px;
+  overflow: auto;
+}
+
+.process-graph-section {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.process-graph-head {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  padding: 0 2px 3px;
+  border-bottom: 1px solid var(--border-1);
+}
+
+.process-graph-row {
+  justify-content: flex-start;
+  width: 100%;
+  min-height: 26px;
+  padding: 5px 7px;
+  background: var(--bg-0);
+  border-color: var(--border-1);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 1180px) {
+  .process-graph {
+    grid-template-columns: repeat(2, minmax(160px, 1fr));
+  }
 }

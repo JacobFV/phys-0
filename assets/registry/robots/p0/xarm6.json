@@ -1,0 +1,33 @@
+{
+  "id": "xarm/xarm6",
+  "name": "UFactory xArm 6",
+  "kind": "robot",
+  "embodiment": "manipulator",
+  "source": {
+    "name": "xArm ROS 2",
+    "upstreamRepo": "https://github.com/xArm-Developer/xarm_ros2",
+    "vendorMaintained": true,
+    "notes": "P0 source record. Upstream files are not yet canonicalized or committed in phys-0."
+  },
+  "quality": "vendor_raw",
+  "formats": ["xacro", "urdf"],
+  "variants": {
+    "external_source": {
+      "descriptionPath": "docs/phys0-external-assets.md",
+      "descriptionFormat": "xacro",
+      "meshRoots": [],
+      "defaultFrame": "link_base",
+      "baseLink": "link_base",
+      "endEffectorFrame": "link_eef",
+      "defaultController": "ros2_control",
+      "simBackends": ["gazebo"]
+    }
+  },
+  "protocols": ["ros2", "ros2_control", "gazebo"],
+  "patches": [],
+  "validation": {
+    "status": "failing",
+    "tests": ["xacro_expand", "xml_parse", "mesh_resolve", "joint_limits", "fk", "bbox", "collision_exists", "sim_spawn"],
+    "failures": ["Source record only; upstream files have not been imported, patched, or validated in this repository."]
+  }
+}

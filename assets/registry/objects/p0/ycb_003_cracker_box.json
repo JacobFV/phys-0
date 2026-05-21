@@ -1,0 +1,29 @@
+{
+  "id": "ycb/003_cracker_box",
+  "name": "YCB 003 Cracker Box",
+  "kind": "object",
+  "source": {
+    "name": "YCB object dataset",
+    "url": "https://www.ycbbenchmarks.com/object-models/",
+    "vendorMaintained": false,
+    "notes": "P0 manipulation object source record. Visual/collision meshes and canonical scale are not yet committed."
+  },
+  "quality": "vendor_raw",
+  "formats": ["obj", "stl"],
+  "variants": {
+    "external_source": {
+      "descriptionPath": "docs/phys0-external-assets.md",
+      "descriptionFormat": "obj",
+      "meshRoots": [],
+      "defaultFrame": "object_frame",
+      "simBackends": ["mujoco", "gazebo"]
+    }
+  },
+  "protocols": ["none", "mujoco", "gazebo"],
+  "patches": [],
+  "validation": {
+    "status": "failing",
+    "tests": ["mesh_resolve", "bbox", "collision_exists", "sim_spawn"],
+    "failures": ["Source record only; object meshes, collision simplification, scale validation, and thumbnails have not been committed."]
+  }
+}

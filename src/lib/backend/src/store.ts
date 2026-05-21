@@ -6,8 +6,23 @@ import type {
   AgentSession,
   AgentSessionEvent,
   AgentSessionEventType,
+  AssetCatalogEntry,
+  AssetManifest,
   Experiment,
+  EntityController,
+  Intervention,
+  InterventionKind,
   JsonObject,
+  JsonValue,
+  Observation,
+  ObservationKind,
+  PhysBackend,
+  PhysEntity,
+  PhysEntityKind,
+  PhysField,
+  PhysFieldKind,
+  PhysProcess,
+  PhysProcessKind,
   RobotKind,
   RobotWorldAssignment,
   VirtualEntityKind,
@@ -116,6 +131,88 @@ export class Chem0Store {
         metadata_json text not null,
         created_at text not null,
         foreign key (experiment_id) references experiments(id)
+      );
+      create table if not exists assets (
+        id text primary key,
+        kind text not null,
+        embodiment text,
+        name text not null,
+        manifest_json text not null,
+        quality text not null,
+        created_at text not null,
+        updated_at text not null
+      );
+      create table if not exists world_entities (
+        id text primary key,
+        world_id text not null,
+        kind text not null,
+        asset_id text,
+        regimes_json text not null,
+        state_json text not null,
+        pose_json text,
+        metadata_json text,
+        created_at text not null,
+        updated_at text not null,
+        foreign key (world_id) references worlds(id)
+      );
+      create table if not exists world_fields (
+        id text primary key,
+        world_id text not null,
+        kind text not null,
+        domain_json text not null,
+        units text,
+        state_ref text,
+        metadata_json text,
+        created_at text not null,
+        updated_at text not null,
+        foreign key (world_id) references worlds(id)
+      );
+      create table if not exists world_processes (
+        id text primary key,
+        world_id text not null,
+        kind text not null,
+        inputs_json text not null,
+        outputs_json text not null,
+        backend text,
+        parameters_json text,
+        created_at text not null,
+        updated_at text not null,
+        foreign key (world_id) references worlds(id)
+      );
+      create table if not exists observations (
+        id text primary key,
+        world_id text not null,
+        source_id text not null,
+        target_ids_json text,
+        kind text not null,
+        timestamp text not null,
+        data_ref text,
+        value_json text,
+        uncertainty_json text,
+        metadata_json text,
+        foreign key (world_id) references worlds(id)
+      );
+      create table if not exists interventions (
+        id text primary key,
+        world_id text not null,
+        actor_id text,
+        target_ids_json text not null,
+        kind text not null,
+        timestamp text not null,
+        payload_json text not null,
+        expected_effects_json text,
+        metadata_json text,
+        foreign key (world_id) references worlds(id)
+      );
+      create table if not exists entity_controllers (
+        id text primary key,
+        entity_id text not null,
+        protocol text not null,
+        endpoint text,
+        config_json text,
+        status text not null,
+        created_at text not null,
+        updated_at text not null
       );
     `);
     this.migrateWorldColumns();
@@ -267,6 +364,319 @@ export class Chem0Store {
     return this.query("select * from worlds order by type asc, created_at asc").map((row) => this.worldFromRow(row));
   }
 
+  upsertAssetManifest(manifest: AssetManifest): AssetCatalogEntry {
+    const previous = this.getAssetManifest(manifest.id);
+    const created = previous?.created_at ?? now();
+    const updated = now();
+    this.run(
+      `insert or replace into assets (id, kind, embodiment, name, manifest_json, quality, created_at, updated_at)
+       values (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        manifest.id,
+        manifest.kind,
+        manifest.embodiment ?? null,
+        manifest.name,
+        JSON.stringify(manifest),
+        manifest.quality,
+        created,
+        updated
+      ]
+    );
+    this.save();
+    const entry = this.getAssetManifest(manifest.id);
+    if (!entry) throw new Error(`Failed to upsert asset: ${manifest.id}`);
+    return entry;
+  }
+
+  listAssetCatalog(): AssetCatalogEntry[] {
+    return this.query("select * from assets order by kind asc, id asc").map((row) => this.assetFromRow(row));
+  }
+
+  getAssetManifest(assetId: string): AssetCatalogEntry | null {
+    const row = this.query("select * from assets where id = ? limit 1", [assetId])[0];
+    return row ? this.assetFromRow(row) : null;
+  }
+
+  spawnEntity(input: {
+    worldId: string;
+    kind: PhysEntityKind;
+    assetId?: string | null;
+    regimes?: string[];
+    state?: JsonObject;
+    pose?: JsonObject | null;
+    metadata?: JsonObject;
+    idPrefix?: string;
+  }): PhysEntity {
+    if (!this.getWorld(input.worldId)) throw new Error(`Unknown world_id: ${input.worldId}`);
+    if (input.assetId && !this.getAssetManifest(input.assetId)) throw new Error(`Unknown asset_id: ${input.assetId}`);
+    const created = now();
+    const entity: PhysEntity = {
+      id: id(input.idPrefix ?? input.kind),
+      world_id: input.worldId,
+      asset_id: input.assetId ?? null,
+      kind: input.kind,
+      regimes: (input.regimes ?? []) as PhysEntity["regimes"],
+      state: input.state ?? {},
+      pose: input.pose ?? null,
+      metadata: input.metadata ?? {},
+      created_at: created,
+      updated_at: created
+    };
+    this.run("insert into world_entities values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
+      entity.id,
+      entity.world_id,
+      entity.kind,
+      entity.asset_id,
+      JSON.stringify(entity.regimes),
+      JSON.stringify(entity.state),
+      entity.pose == null ? null : JSON.stringify(entity.pose),
+      JSON.stringify(entity.metadata),
+      entity.created_at,
+      entity.updated_at
+    ]);
+    this.save();
+    return entity;
+  }
+
+  listWorldEntities(worldId?: string): PhysEntity[] {
+    const rows = worldId
+      ? this.query("select * from world_entities where world_id = ? order by created_at asc", [worldId])
+      : this.query("select * from world_entities order by created_at asc");
+    return rows.map((row) => this.physEntityFromRow(row));
+  }
+
+  getWorldEntity(entityId: string): PhysEntity | null {
+    const row = this.query("select * from world_entities where id = ? limit 1", [entityId])[0];
+    return row ? this.physEntityFromRow(row) : null;
+  }
+
+  addField(input: {
+    worldId: string;
+    kind: PhysFieldKind;
+    domain: JsonObject;
+    units?: string | null;
+    stateRef?: string | null;
+    metadata?: JsonObject;
+  }): PhysField {
+    if (!this.getWorld(input.worldId)) throw new Error(`Unknown world_id: ${input.worldId}`);
+    const created = now();
+    const field: PhysField = {
+      id: id("field"),
+      world_id: input.worldId,
+      kind: input.kind,
+      domain: input.domain,
+      units: input.units ?? null,
+      state_ref: input.stateRef ?? null,
+      metadata: input.metadata ?? {},
+      created_at: created,
+      updated_at: created
+    };
+    this.run("insert into world_fields values (?, ?, ?, ?, ?, ?, ?, ?, ?)", [
+      field.id,
+      field.world_id,
+      field.kind,
+      JSON.stringify(field.domain),
+      field.units,
+      field.state_ref,
+      JSON.stringify(field.metadata),
+      field.created_at,
+      field.updated_at
+    ]);
+    this.save();
+    return field;
+  }
+
+  listWorldFields(worldId?: string): PhysField[] {
+    const rows = worldId
+      ? this.query("select * from world_fields where world_id = ? order by created_at asc", [worldId])
+      : this.query("select * from world_fields order by created_at asc");
+    return rows.map((row) => this.physFieldFromRow(row));
+  }
+
+  addProcess(input: {
+    worldId: string;
+    kind: PhysProcessKind;
+    inputs: string[];
+    outputs: string[];
+    backend?: PhysBackend | null;
+    parameters?: JsonObject;
+  }): PhysProcess {
+    if (!this.getWorld(input.worldId)) throw new Error(`Unknown world_id: ${input.worldId}`);
+    const created = now();
+    const process: PhysProcess = {
+      id: id("process"),
+      world_id: input.worldId,
+      kind: input.kind,
+      inputs: input.inputs,
+      outputs: input.outputs,
+      backend: input.backend ?? null,
+      parameters: input.parameters ?? {},
+      created_at: created,
+      updated_at: created
+    };
+    this.run("insert into world_processes values (?, ?, ?, ?, ?, ?, ?, ?, ?)", [
+      process.id,
+      process.world_id,
+      process.kind,
+      JSON.stringify(process.inputs),
+      JSON.stringify(process.outputs),
+      process.backend,
+      JSON.stringify(process.parameters),
+      process.created_at,
+      process.updated_at
+    ]);
+    this.save();
+    return process;
+  }
+
+  listWorldProcesses(worldId?: string): PhysProcess[] {
+    const rows = worldId
+      ? this.query("select * from world_processes where world_id = ? order by created_at asc", [worldId])
+      : this.query("select * from world_processes order by created_at asc");
+    return rows.map((row) => this.physProcessFromRow(row));
+  }
+
+  recordObservation(input: {
+    worldId: string;
+    sourceId: string;
+    targetIds?: string[] | null;
+    kind: ObservationKind;
+    timestamp?: string;
+    dataRef?: string | null;
+    value?: JsonValue | null;
+    uncertainty?: JsonValue | null;
+    metadata?: JsonObject;
+  }): Observation {
+    if (!this.getWorld(input.worldId)) throw new Error(`Unknown world_id: ${input.worldId}`);
+    const observation: Observation = {
+      id: id("obs"),
+      world_id: input.worldId,
+      source_id: input.sourceId,
+      target_ids: input.targetIds ?? null,
+      kind: input.kind,
+      timestamp: input.timestamp ?? now(),
+      data_ref: input.dataRef ?? null,
+      value: input.value ?? null,
+      uncertainty: input.uncertainty ?? null,
+      metadata: input.metadata ?? {}
+    };
+    this.run("insert into observations values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
+      observation.id,
+      observation.world_id,
+      observation.source_id,
+      observation.target_ids == null ? null : JSON.stringify(observation.target_ids),
+      observation.kind,
+      observation.timestamp,
+      observation.data_ref,
+      JSON.stringify(observation.value),
+      JSON.stringify(observation.uncertainty),
+      JSON.stringify(observation.metadata)
+    ]);
+    this.save();
+    return observation;
+  }
+
+  recordIntervention(input: {
+    worldId: string;
+    actorId?: string | null;
+    targetIds: string[];
+    kind: InterventionKind;
+    timestamp?: string;
+    payload: JsonValue;
+    expectedEffects?: string[] | null;
+    metadata?: JsonObject;
+  }): Intervention {
+    if (!this.getWorld(input.worldId)) throw new Error(`Unknown world_id: ${input.worldId}`);
+    const intervention: Intervention = {
+      id: id("int"),
+      world_id: input.worldId,
+      actor_id: input.actorId ?? null,
+      target_ids: input.targetIds,
+      kind: input.kind,
+      timestamp: input.timestamp ?? now(),
+      payload: input.payload,
+      expected_effects: input.expectedEffects ?? null,
+      metadata: input.metadata ?? {}
+    };
+    this.run("insert into interventions values (?, ?, ?, ?, ?, ?, ?, ?, ?)", [
+      intervention.id,
+      intervention.world_id,
+      intervention.actor_id,
+      JSON.stringify(intervention.target_ids),
+      intervention.kind,
+      intervention.timestamp,
+      JSON.stringify(intervention.payload),
+      intervention.expected_effects == null ? null : JSON.stringify(intervention.expected_effects),
+      JSON.stringify(intervention.metadata)
+    ]);
+    this.save();
+    return intervention;
+  }
+
+  queryHistory(worldId: string, limit = 100): { observations: Observation[]; interventions: Intervention[] } {
+    if (!this.getWorld(worldId)) throw new Error(`Unknown world_id: ${worldId}`);
+    const boundedLimit = Math.max(1, Math.min(1000, Math.floor(limit)));
+    return {
+      observations: this.query("select * from observations where world_id = ? order by timestamp desc limit ?", [worldId, boundedLimit]).map((row) =>
+        this.observationFromRow(row)
+      ),
+      interventions: this.query("select * from interventions where world_id = ? order by timestamp desc limit ?", [worldId, boundedLimit]).map((row) =>
+        this.interventionFromRow(row)
+      )
+    };
+  }
+
+  connectController(input: {
+    entityId: string;
+    protocol: EntityController["protocol"];
+    endpoint?: string | null;
+    config?: JsonObject;
+    status?: string;
+  }): EntityController {
+    const entity = this.query("select id from world_entities where id = ? limit 1", [input.entityId])[0];
+    if (!entity) throw new Error(`Unknown entity_id: ${input.entityId}`);
+    const created = now();
+    const controller: EntityController = {
+      id: id("ctrl"),
+      entity_id: input.entityId,
+      protocol: input.protocol,
+      endpoint: input.endpoint ?? null,
+      config: input.config ?? {},
+      status: input.status ?? "configured",
+      created_at: created,
+      updated_at: created
+    };
+    this.run("insert into entity_controllers values (?, ?, ?, ?, ?, ?, ?, ?)", [
+      controller.id,
+      controller.entity_id,
+      controller.protocol,
+      controller.endpoint,
+      JSON.stringify(controller.config),
+      controller.status,
+      controller.created_at,
+      controller.updated_at
+    ]);
+    this.save();
+    return controller;
+  }
+
+  updateControllerStatus(controllerId: string, status: string): EntityController {
+    const current = this.query("select * from entity_controllers where id = ? limit 1", [controllerId])[0];
+    if (!current) throw new Error(`Unknown controller_id: ${controllerId}`);
+    this.run("update entity_controllers set status = ?, updated_at = ? where id = ?", [status, now(), controllerId]);
+    this.save();
+    const updated = this.query("select * from entity_controllers where id = ? limit 1", [controllerId])[0];
+    if (!updated) throw new Error(`Unknown controller_id: ${controllerId}`);
+    return this.controllerFromRow(updated);
+  }
+
+  listEntityControllers(entityId?: string): EntityController[] {
+    const rows = entityId
+      ? this.query("select * from entity_controllers where entity_id = ? order by created_at asc", [entityId])
+      : this.query("select * from entity_controllers order by created_at asc");
+    return rows.map((row) => this.controllerFromRow(row));
+  }
+
   getWorld(worldId: string): World | null {
     const row = this.query("select * from worlds where id = ? limit 1", [worldId])[0];
     return row ? this.worldFromRow(row) : null;
@@ -278,6 +688,11 @@ export class Chem0Store {
     if (experimentCount > 0) throw new Error("Cannot delete a world with experiments.");
     this.run("delete from robot_world_assignments where world_id = ?", [worldId]);
     this.run("delete from virtual_world_entities where world_id = ?", [worldId]);
+    this.run("delete from observations where world_id = ?", [worldId]);
+    this.run("delete from interventions where world_id = ?", [worldId]);
+    this.run("delete from world_processes where world_id = ?", [worldId]);
+    this.run("delete from world_fields where world_id = ?", [worldId]);
+    this.run("delete from world_entities where world_id = ?", [worldId]);
     this.run("delete from worlds where id = ?", [worldId]);
     this.save();
   }
@@ -589,6 +1004,104 @@ export class Chem0Store {
       pose: JSON.parse(String(row.pose_json)) as JsonObject,
       spec: JSON.parse(String(row.spec_json)) as JsonObject,
       collision_enabled: Number(row.collision_enabled) === 1,
+      created_at: String(row.created_at),
+      updated_at: String(row.updated_at)
+    };
+  }
+
+  private assetFromRow(row: Record<string, unknown>): AssetCatalogEntry {
+    return {
+      id: String(row.id),
+      kind: String(row.kind) as AssetCatalogEntry["kind"],
+      embodiment: row.embodiment == null ? null : String(row.embodiment) as AssetCatalogEntry["embodiment"],
+      name: String(row.name),
+      manifest: JSON.parse(String(row.manifest_json)) as AssetManifest,
+      quality: String(row.quality) as AssetCatalogEntry["quality"],
+      created_at: String(row.created_at),
+      updated_at: String(row.updated_at)
+    };
+  }
+
+  private physEntityFromRow(row: Record<string, unknown>): PhysEntity {
+    return {
+      id: String(row.id),
+      world_id: String(row.world_id),
+      kind: String(row.kind) as PhysEntityKind,
+      asset_id: row.asset_id == null ? null : String(row.asset_id),
+      regimes: JSON.parse(String(row.regimes_json)) as PhysEntity["regimes"],
+      state: JSON.parse(String(row.state_json)) as JsonObject,
+      pose: row.pose_json == null ? null : JSON.parse(String(row.pose_json)) as JsonObject,
+      metadata: row.metadata_json == null ? {} : JSON.parse(String(row.metadata_json)) as JsonObject,
+      created_at: String(row.created_at),
+      updated_at: String(row.updated_at)
+    };
+  }
+
+  private physFieldFromRow(row: Record<string, unknown>): PhysField {
+    return {
+      id: String(row.id),
+      world_id: String(row.world_id),
+      kind: String(row.kind) as PhysFieldKind,
+      domain: JSON.parse(String(row.domain_json)) as JsonObject,
+      units: row.units == null ? null : String(row.units),
+      state_ref: row.state_ref == null ? null : String(row.state_ref),
+      metadata: row.metadata_json == null ? {} : JSON.parse(String(row.metadata_json)) as JsonObject,
+      created_at: String(row.created_at),
+      updated_at: String(row.updated_at)
+    };
+  }
+
+  private physProcessFromRow(row: Record<string, unknown>): PhysProcess {
+    return {
+      id: String(row.id),
+      world_id: String(row.world_id),
+      kind: String(row.kind) as PhysProcessKind,
+      inputs: JSON.parse(String(row.inputs_json)) as string[],
+      outputs: JSON.parse(String(row.outputs_json)) as string[],
+      backend: row.backend == null ? null : String(row.backend) as PhysBackend,
+      parameters: row.parameters_json == null ? {} : JSON.parse(String(row.parameters_json)) as JsonObject,
+      created_at: String(row.created_at),
+      updated_at: String(row.updated_at)
+    };
+  }
+
+  private observationFromRow(row: Record<string, unknown>): Observation {
+    return {
+      id: String(row.id),
+      world_id: String(row.world_id),
+      source_id: String(row.source_id),
+      target_ids: row.target_ids_json == null ? null : JSON.parse(String(row.target_ids_json)) as string[],
+      kind: String(row.kind) as ObservationKind,
+      timestamp: String(row.timestamp),
+      data_ref: row.data_ref == null ? null : String(row.data_ref),
+      value: row.value_json == null ? null : JSON.parse(String(row.value_json)) as JsonValue,
+      uncertainty: row.uncertainty_json == null ? null : JSON.parse(String(row.uncertainty_json)) as JsonValue,
+      metadata: row.metadata_json == null ? {} : JSON.parse(String(row.metadata_json)) as JsonObject
+    };
+  }
+
+  private interventionFromRow(row: Record<string, unknown>): Intervention {
+    return {
+      id: String(row.id),
+      world_id: String(row.world_id),
+      actor_id: row.actor_id == null ? null : String(row.actor_id),
+      target_ids: JSON.parse(String(row.target_ids_json)) as string[],
+      kind: String(row.kind) as InterventionKind,
+      timestamp: String(row.timestamp),
+      payload: JSON.parse(String(row.payload_json)) as JsonValue,
+      expected_effects: row.expected_effects_json == null ? null : JSON.parse(String(row.expected_effects_json)) as string[],
+      metadata: row.metadata_json == null ? {} : JSON.parse(String(row.metadata_json)) as JsonObject
+    };
+  }
+
+  private controllerFromRow(row: Record<string, unknown>): EntityController {
+    return {
+      id: String(row.id),
+      entity_id: String(row.entity_id),
+      protocol: String(row.protocol) as EntityController["protocol"],
+      endpoint: row.endpoint == null ? null : String(row.endpoint),
+      config: row.config_json == null ? {} : JSON.parse(String(row.config_json)) as JsonObject,
+      status: String(row.status),
       created_at: String(row.created_at),
       updated_at: String(row.updated_at)
     };
