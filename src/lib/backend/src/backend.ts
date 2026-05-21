@@ -99,7 +99,7 @@ export class Chem0Backend extends EventEmitter {
     await this.init();
     if (name === "create_experiment") {
       const worldId = typeof args.world_id === "string" && args.world_id.trim() ? args.world_id : DEFAULT_PHYSICAL_WORLD_ID;
-      return this.createExperiment(String(args.name ?? "Untitled experiment"), (args.metadata as JsonObject) ?? {}, worldId);
+      return this.createExperiment(String(args.name ?? "Untitled experiment"), (args.metadata as JsonObject) ?? {}, worldId, args.seed);
     }
     if (name === "list_experiments") {
       return { experiments: this.store.listExperiments() as unknown as JsonObject[] };
@@ -117,7 +117,8 @@ export class Chem0Backend extends EventEmitter {
         world: this.store.createWorld({
           name: String(args.name ?? ""),
           type: String(args.type ?? "physical") as WorldType,
-          metadata: (args.metadata as JsonObject) ?? {}
+          metadata: (args.metadata as JsonObject) ?? {},
+          seed: args.seed
         }) as unknown as JsonObject
       };
     }
@@ -517,8 +518,8 @@ export class Chem0Backend extends EventEmitter {
     return result;
   }
 
-  createExperiment(name: string, metadata: JsonObject = {}, worldId = DEFAULT_PHYSICAL_WORLD_ID): JsonObject {
-    const experiment = this.store.createExperiment(name, metadata, worldId);
+  createExperiment(name: string, metadata: JsonObject = {}, worldId = DEFAULT_PHYSICAL_WORLD_ID, seed?: unknown): JsonObject {
+    const experiment = this.store.createExperiment(name, metadata, worldId, seed);
     const session = this.store.createSession(experiment.id, DEFAULT_MODEL);
     this.store.appendEvent({
       experimentId: experiment.id,
@@ -822,6 +823,7 @@ export class Chem0Backend extends EventEmitter {
       id: world.id,
       name: world.name,
       kind: world.type === "virtual" ? "simulated" : "physical",
+      seed: world.seed,
       regimes,
       frameConvention: typeof world.metadata.frameConvention === "string" ? world.metadata.frameConvention : "ros_enu",
       entities: entities as unknown as JsonObject[],

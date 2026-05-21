@@ -76,6 +76,7 @@ export interface PhysWorld {
   id: string;
   name: string;
   kind: WorldKind;
+  seed?: number;
   regimes: DynamicalRegime[];
   frameConvention?: FrameConvention;
   entities: PhysEntity[];
@@ -262,6 +263,7 @@ export interface Experiment {
   world_id: string;
   name: string;
   status: string;
+  seed: number;
   created_at: string;
   updated_at: string;
   metadata: JsonObject;
@@ -285,6 +287,7 @@ export interface World {
   type: WorldType;
   status: string;
   default_robot_id: string | null;
+  seed: number;
   created_at: string;
   updated_at: string;
   metadata: JsonObject;

@@ -64,7 +64,7 @@ async function main(): Promise<void> {
           "phys0 asset validate <asset_id>",
           "phys0 asset import <path> --id <asset_id> [--name <name>] [--kind robot] [--format urdf]",
           "phys0 asset patch <asset_id> --patch '{...}'",
-          "phys0 world create <name> [--type physical|virtual]",
+          "phys0 world create <name> [--type physical|virtual] [--seed <number|string>]",
           "phys0 world spawn-robot <asset_id> --world-id <id> [--backend gazebo] [--controller ros2_control]",
           "phys0 world spawn-object <asset_id> --world-id <id>",
           "phys0 world add-field <kind> --world-id <id> --domain '{...}'",
@@ -101,7 +101,11 @@ async function main(): Promise<void> {
     }
 
     if (scope === "world" && action === "create") {
-      print(await backend.callTool("create_world", { name: arg ?? "World", type: flagString(parsed.flags, "type") ?? "physical" }));
+      print(await backend.callTool("create_world", json({
+        name: arg ?? "World",
+        type: flagString(parsed.flags, "type") ?? "physical",
+        seed: flagString(parsed.flags, "seed")
+      })));
       return;
     }
     if (scope === "world" && action === "spawn-robot") {
