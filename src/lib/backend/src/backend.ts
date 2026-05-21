@@ -4,9 +4,24 @@ import path from "node:path";
 import process from "node:process";
 import OpenAI from "openai";
 import { AudioService } from "./audio";
+import { AssetRegistry } from "./assetRegistry";
 import { PythonBridge } from "./pythonBridge";
+import {
+  DYNAMICAL_REGIMES,
+  INTERVENTION_KINDS,
+  OBSERVATION_KINDS,
+  PHYS_BACKENDS,
+  PHYS_ENTITY_KINDS,
+  PHYS_FIELD_KINDS,
+  PHYS_PROCESS_KINDS,
+  PROTOCOLS,
+  optionalEnum,
+  requireEnum,
+  requireStringArray
+} from "./physSchema";
+import { ExternalRuntimeAdapter, LeRobotAdapter, parseRobotCommand, type PhysProtocolAdapter } from "./protocolAdapters";
 import { Chem0Store, DEFAULT_PHYSICAL_WORLD_ID } from "./store";
-import type { AssetManifest, Experiment, JsonObject, JsonValue, PhysBackend, PhysEntityKind, PhysFieldKind, PhysProcessKind, Protocol, RobotKind, WorldType } from "./types";
+import type { AssetFormat, AssetKind, AssetManifest, Experiment, JsonObject, JsonValue, Protocol, RobotEmbodiment, RobotKind, WorldType } from "./types";
 
 const DEFAULT_MODEL = "gpt-5.5";
 const MAX_AGENT_STEPS = 8;
@@ -27,6 +42,8 @@ export class Chem0Backend extends EventEmitter {
   readonly store: Chem0Store;
   readonly bridge: PythonBridge;
   readonly audio: AudioService;
+  readonly assetRegistry: AssetRegistry;
+  private readonly adapters: Map<Protocol, PhysProtocolAdapter>;
   private initialized = false;
 
   constructor(readonly repoRoot: string, dataDir = path.join(repoRoot, "data")) {
@@ -35,6 +52,20 @@ export class Chem0Backend extends EventEmitter {
     this.store = new Chem0Store(repoRoot, dataDir);
     this.audio = new AudioService(dataDir);
     this.bridge = new PythonBridge(repoRoot);
+    this.assetRegistry = new AssetRegistry(repoRoot);
+    this.adapters = new Map<Protocol, PhysProtocolAdapter>([
+      ["lerobot", new LeRobotAdapter((tool, toolArgs) => this.executeTool(tool, toolArgs))],
+      ["ros2", new ExternalRuntimeAdapter("ros2", "ros2", ["raw"])],
+      ["ros2_control", new ExternalRuntimeAdapter("ros2_control", "ros2", ["joint_position", "joint_velocity", "raw"])],
+      ["mavlink", new ExternalRuntimeAdapter("mavlink", "mavproxy.py", ["mavlink_takeoff", "mavlink_land", "mavlink_goto", "raw"])],
+      ["gazebo", new ExternalRuntimeAdapter("gazebo", "gz", ["raw"])],
+      ["mujoco", new ExternalRuntimeAdapter("mujoco", "python", ["raw"])],
+      ["isaac", new ExternalRuntimeAdapter("isaac", "python", ["raw"])],
+      ["sapien", new ExternalRuntimeAdapter("sapien", "python", ["raw"])],
+      ["sdk", new ExternalRuntimeAdapter("sdk", "python", ["raw"])],
+      ["serial", new ExternalRuntimeAdapter("serial", "python", ["raw"])],
+      ["none", new ExternalRuntimeAdapter("none", "true", [])]
+    ]);
     this.bridge.on("stderr", (text) => this.emit("stderr", text));
   }
 
@@ -247,13 +278,33 @@ export class Chem0Backend extends EventEmitter {
       if (!assetId) throw new Error("validate_asset requires asset_id.");
       return { validation: this.validateAsset(assetId) };
     }
+    if (name === "import_asset") {
+      const manifest = this.assetRegistry.importDescription({
+        sourcePath: String(args.path ?? ""),
+        id: String(args.id ?? ""),
+        name: typeof args.name === "string" ? args.name : undefined,
+        format: optionalEnum(args.format, ["urdf", "xacro", "sdf", "mjcf", "usd", "stl", "dae", "obj", "gltf", "glb"] as const, "format") as AssetFormat | null ?? undefined,
+        kind: optionalEnum(args.kind, ["robot", "object", "scene", "sensor", "material", "process", "terrain", "marker", "field"] as const, "kind") as AssetKind | null ?? undefined,
+        embodiment: optionalEnum(args.embodiment, ["manipulator", "mobile_base", "mobile_manipulator", "drone", "quadruped", "humanoid", "soft_robot", "custom"] as const, "embodiment") as RobotEmbodiment | null ?? undefined,
+        metadata: (args.metadata as JsonObject) ?? {}
+      });
+      return { asset: this.store.upsertAssetManifest(manifest) as unknown as JsonObject };
+    }
+    if (name === "patch_asset") {
+      const assetId = String(args.asset_id ?? "").trim();
+      if (!assetId) throw new Error("patch_asset requires asset_id.");
+      const asset = this.store.getAssetManifest(assetId);
+      if (!asset) throw new Error(`Unknown asset_id: ${assetId}`);
+      const manifest = this.assetRegistry.patchManifest(asset.manifest, (args.patch as JsonObject) ?? {});
+      return { asset: this.store.upsertAssetManifest(manifest) as unknown as JsonObject };
+    }
     if (name === "spawn_entity") {
       return {
         entity: this.store.spawnEntity({
           worldId: String(args.world_id ?? ""),
-          kind: String(args.kind ?? "custom") as PhysEntityKind,
+          kind: requireEnum(args.kind ?? "custom", PHYS_ENTITY_KINDS, "entity kind"),
           assetId: typeof args.asset_id === "string" && args.asset_id.trim() ? args.asset_id : null,
-          regimes: Array.isArray(args.regimes) ? args.regimes.map(String) : [],
+          regimes: (Array.isArray(args.regimes) ? args.regimes.map((value) => requireEnum(value, DYNAMICAL_REGIMES, "regime")) : []),
           state: (args.state as JsonObject) ?? {},
           pose: (args.pose as JsonObject) ?? null,
           metadata: (args.metadata as JsonObject) ?? {}
@@ -261,6 +312,7 @@ export class Chem0Backend extends EventEmitter {
       };
     }
     if (name === "spawn_robot") {
+      this.assertAssetSpawnable(String(args.asset_id ?? ""), args.allow_unvalidated === true);
       return {
         entity: this.store.spawnEntity({
           worldId: String(args.world_id ?? ""),
@@ -278,6 +330,7 @@ export class Chem0Backend extends EventEmitter {
       };
     }
     if (name === "spawn_object") {
+      this.assertAssetSpawnable(String(args.asset_id ?? ""), args.allow_unvalidated === true);
       return {
         entity: this.store.spawnEntity({
           worldId: String(args.world_id ?? ""),
@@ -294,7 +347,7 @@ export class Chem0Backend extends EventEmitter {
       return {
         field: this.store.addField({
           worldId: String(args.world_id ?? ""),
-          kind: String(args.kind ?? "custom") as PhysFieldKind,
+          kind: requireEnum(args.kind ?? "custom", PHYS_FIELD_KINDS, "field kind"),
           domain: (args.domain as JsonObject) ?? { type: "symbolic" },
           units: typeof args.units === "string" ? args.units : null,
           stateRef: typeof args.state_ref === "string" ? args.state_ref : null,
@@ -306,10 +359,10 @@ export class Chem0Backend extends EventEmitter {
       return {
         process: this.store.addProcess({
           worldId: String(args.world_id ?? ""),
-          kind: String(args.kind ?? "custom") as PhysProcessKind,
-          inputs: Array.isArray(args.inputs) ? args.inputs.map(String) : [],
-          outputs: Array.isArray(args.outputs) ? args.outputs.map(String) : [],
-          backend: typeof args.backend === "string" ? args.backend as PhysBackend : null,
+          kind: requireEnum(args.kind ?? "custom", PHYS_PROCESS_KINDS, "process kind"),
+          inputs: requireStringArray(args.inputs, "inputs"),
+          outputs: requireStringArray(args.outputs, "outputs"),
+          backend: optionalEnum(args.backend, PHYS_BACKENDS, "process backend"),
           parameters: (args.parameters as JsonObject) ?? {}
         }) as unknown as JsonObject
       };
@@ -320,7 +373,7 @@ export class Chem0Backend extends EventEmitter {
           worldId: String(args.world_id ?? ""),
           sourceId: String(args.source_id ?? ""),
           targetIds: Array.isArray(args.target_ids) ? args.target_ids.map(String) : null,
-          kind: String(args.kind ?? "custom") as never,
+          kind: requireEnum(args.kind ?? "custom", OBSERVATION_KINDS, "observation kind"),
           timestamp: typeof args.timestamp === "string" ? args.timestamp : undefined,
           dataRef: typeof args.data_ref === "string" ? args.data_ref : null,
           value: (args.value ?? null) as JsonValue,
@@ -334,8 +387,8 @@ export class Chem0Backend extends EventEmitter {
         intervention: this.store.recordIntervention({
           worldId: String(args.world_id ?? ""),
           actorId: typeof args.actor_id === "string" ? args.actor_id : null,
-          targetIds: Array.isArray(args.target_ids) ? args.target_ids.map(String) : [],
-          kind: String(args.kind ?? "custom") as never,
+          targetIds: requireStringArray(args.target_ids, "target_ids"),
+          kind: requireEnum(args.kind ?? "custom", INTERVENTION_KINDS, "intervention kind"),
           timestamp: typeof args.timestamp === "string" ? args.timestamp : undefined,
           payload: (args.payload ?? {}) as JsonValue,
           expectedEffects: Array.isArray(args.expected_effects) ? args.expected_effects.map(String) : null,
@@ -353,35 +406,54 @@ export class Chem0Backend extends EventEmitter {
       return { adapters: this.protocolAdapters() as unknown as JsonObject[] };
     }
     if (name === "connect_controller") {
-      return {
-        controller: this.store.connectController({
+      const protocol = requireEnum(args.protocol ?? "none", PROTOCOLS, "protocol");
+      const controller = this.store.connectController({
           entityId: String(args.entity_id ?? ""),
-          protocol: String(args.protocol ?? "none") as Protocol,
+          protocol,
           endpoint: typeof args.endpoint === "string" ? args.endpoint : null,
           config: (args.config as JsonObject) ?? {}
-        }) as unknown as JsonObject
-      };
+      });
+      const adapter = this.adapters.get(protocol);
+      if (adapter && protocol !== "none") {
+        await adapter.connect({ endpoint: controller.endpoint, config: controller.config });
+        return { controller: this.store.updateControllerStatus(controller.id, "connected") as unknown as JsonObject };
+      }
+      return { controller: controller as unknown as JsonObject };
     }
     if (name === "read_state") {
       const entityId = String(args.entity_id ?? "");
-      const entity = this.store.listWorldEntities().find((candidate) => candidate.id === entityId);
+      const entity = this.store.getWorldEntity(entityId);
       if (!entity) throw new Error(`Unknown entity_id: ${entityId}`);
-      return { entity_id: entity.id, state: entity.state, controllers: this.store.listEntityControllers(entity.id) as unknown as JsonObject[] };
+      const controllers = this.store.listEntityControllers(entity.id);
+      const adapterState = await this.readAdapterState(entity.id);
+      return { entity_id: entity.id, state: entity.state, controllers: controllers as unknown as JsonObject[], adapter_state: adapterState };
     }
     if (name === "send_command") {
       const entityId = String(args.entity_id ?? "");
-      const command = (args.command ?? {}) as JsonValue;
-      const entity = this.store.listWorldEntities().find((candidate) => candidate.id === entityId);
+      const command = parseRobotCommand(args.command);
+      const entity = this.store.getWorldEntity(entityId);
       if (!entity) throw new Error(`Unknown entity_id: ${entityId}`);
+      const result = await this.dispatchCommand(entity.id, command);
       const intervention = this.store.recordIntervention({
         worldId: entity.world_id,
         actorId: typeof args.actor_id === "string" ? args.actor_id : null,
         targetIds: [entity.id],
         kind: "robot_command",
-        payload: command,
-        metadata: { via: "send_command", dry_run: true }
+        payload: command as unknown as JsonValue,
+        metadata: { via: "send_command", adapter_result: result as JsonValue }
       });
-      return { ok: true, dry_run: true, intervention: intervention as unknown as JsonObject };
+      return { ok: true, result: result as JsonValue, intervention: intervention as unknown as JsonObject };
+    }
+    if (name === "disconnect_controller") {
+      const controllerId = String(args.controller_id ?? "");
+      const controller = this.store.listEntityControllers().find((item) => item.id === controllerId);
+      if (!controller) throw new Error(`Unknown controller_id: ${controllerId}`);
+      const adapter = this.adapters.get(controller.protocol);
+      if (adapter) await adapter.disconnect();
+      return { controller: this.store.updateControllerStatus(controllerId, "disconnected") as unknown as JsonObject };
+    }
+    if (name === "start_sim" || name === "stop_sim" || name === "reset_sim" || name === "step_sim") {
+      return this.handleSimTool(name, args);
     }
     if (name === "list_experiment_artifacts") {
       return { artifacts: this.store.listArtifacts(String(args.experiment_id)) };
@@ -721,44 +793,22 @@ export class Chem0Backend extends EventEmitter {
   }
 
   private loadAssetRegistry(): void {
-    const registryDir = path.join(this.repoRoot, "assets", "registry");
-    if (!fs.existsSync(registryDir)) return;
-    const stack = [registryDir];
-    while (stack.length > 0) {
-      const dir = stack.pop();
-      if (!dir) continue;
-      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        const absolute = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-          stack.push(absolute);
-          continue;
-        }
-        if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
-        const manifest = JSON.parse(fs.readFileSync(absolute, "utf8")) as AssetManifest;
-        if (manifest && typeof manifest.id === "string") this.store.upsertAssetManifest(manifest);
-      }
-    }
+    for (const manifest of this.assetRegistry.loadManifests()) this.store.upsertAssetManifest(manifest);
   }
 
   private validateAsset(assetId: string): JsonObject {
     const asset = this.store.getAssetManifest(assetId);
     if (!asset) throw new Error(`Unknown asset_id: ${assetId}`);
-    const failures: string[] = [];
-    for (const variant of Object.values(asset.manifest.variants)) {
-      const descriptionPath = typeof variant.descriptionPath === "string" ? variant.descriptionPath : "";
-      if (!descriptionPath) failures.push("variant missing descriptionPath");
-      if (descriptionPath && !fs.existsSync(path.join(this.repoRoot, descriptionPath))) failures.push(`missing description: ${descriptionPath}`);
-      const meshRoots = Array.isArray(variant.meshRoots) ? variant.meshRoots.map(String) : [];
-      for (const root of meshRoots) {
-        if (!fs.existsSync(path.join(this.repoRoot, root))) failures.push(`missing mesh root: ${root}`);
-      }
+    return this.assetRegistry.validateManifest(asset.manifest) as unknown as JsonObject;
+  }
+
+  private assertAssetSpawnable(assetId: string, allowUnvalidated: boolean): void {
+    const asset = this.store.getAssetManifest(assetId);
+    if (!asset) throw new Error(`Unknown asset_id: ${assetId}`);
+    const validation = this.assetRegistry.validateManifest(asset.manifest);
+    if ((validation.status === "failing" || validation.status === "unknown") && !allowUnvalidated) {
+      throw new Error(`Asset ${assetId} is not spawnable without allow_unvalidated=true; validation status is ${validation.status}.`);
     }
-    return {
-      asset_id: assetId,
-      status: failures.length === 0 ? asset.manifest.validation.status : "failing",
-      deterministic_checks: ["manifest_parse", "description_path_exists", "mesh_roots_exist"],
-      failures
-    };
   }
 
   private exportWorld(worldId: string): JsonObject {
@@ -785,18 +835,52 @@ export class Chem0Backend extends EventEmitter {
   }
 
   private protocolAdapters(): JsonObject[] {
-    return [
-      { id: "lerobot", status: "implemented", commands: ["joint_position", "cartesian_pose", "gripper"], runtime: "python_bridge" },
-      { id: "ros2", status: "stub", commands: ["raw"], runtime: "external" },
-      { id: "ros2_control", status: "stub", commands: ["joint_position", "joint_velocity"], runtime: "external" },
-      { id: "mavlink", status: "stub", commands: ["mavlink_takeoff", "mavlink_land", "mavlink_goto"], runtime: "external" },
-      { id: "gazebo", status: "stub", commands: ["spawn", "step", "reset"], runtime: "external" },
-      { id: "mujoco", status: "stub", commands: ["spawn", "step", "reset"], runtime: "external" },
-      { id: "isaac", status: "planned", commands: [], runtime: "external" },
-      { id: "sapien", status: "planned", commands: [], runtime: "external" },
-      { id: "taichi", status: "planned", commands: [], runtime: "external" },
-      { id: "openfoam", status: "planned", commands: [], runtime: "external" }
-    ];
+    const configured = Array.from(this.adapters.values()).map((adapter) => adapter.status());
+    const planned = ["i2c", "spi", "uart", "can"].map((id) => ({ id, status: "planned", commands: [], runtime: "hardware_bus" }));
+    return [...configured, ...planned];
+  }
+
+  private async dispatchCommand(entityId: string, command: ReturnType<typeof parseRobotCommand>): Promise<unknown> {
+    const controllers = this.store.listEntityControllers(entityId);
+    const protocol = controllers[0]?.protocol ?? (this.store.getWorldEntity(entityId)?.state.controller as Protocol | undefined) ?? "none";
+    const adapter = this.adapters.get(protocol);
+    if (!adapter) throw new Error(`No adapter registered for protocol: ${protocol}`);
+    if (!adapter.supports(command.type)) throw new Error(`${protocol} adapter does not support command ${command.type}.`);
+    return adapter.command(entityId, command);
+  }
+
+  private async readAdapterState(entityId: string): Promise<JsonValue> {
+    const controllers = this.store.listEntityControllers(entityId);
+    const states: JsonValue[] = [];
+    for (const controller of controllers) {
+      const adapter = this.adapters.get(controller.protocol);
+      if (!adapter) continue;
+      states.push(await adapter.getState(entityId) as JsonValue);
+    }
+    return states;
+  }
+
+  private async handleSimTool(name: string, args: JsonObject): Promise<JsonObject> {
+    const backend = optionalEnum(args.backend, PHYS_BACKENDS, "sim backend") ?? "custom";
+    const sessionId = typeof args.session_id === "string" && args.session_id.trim() ? args.session_id : `sim_${backend}_${Date.now().toString(36)}`;
+    const payload = {
+      session_id: sessionId,
+      backend,
+      world_id: typeof args.world_id === "string" ? args.world_id : null,
+      status: name === "start_sim" ? "started" : name === "stop_sim" ? "stopped" : name === "reset_sim" ? "reset" : "stepped",
+      step_dt_s: typeof args.dt_s === "number" ? args.dt_s : null,
+      note: "Simulation lifecycle is recorded in phys-0; backend-specific process launch is delegated to the selected runtime adapter."
+    };
+    if (payload.world_id) {
+      this.store.recordIntervention({
+        worldId: payload.world_id,
+        targetIds: [],
+        kind: "environment_change",
+        payload: payload as unknown as JsonValue,
+        metadata: { tool: name }
+      });
+    }
+    return payload as unknown as JsonObject;
   }
 
   private backendTools(): JsonObject[] {
@@ -1020,6 +1104,37 @@ export class Chem0Backend extends EventEmitter {
         }
       },
       {
+        name: "import_asset",
+        description: "Import a local asset description bundle into assets/imported and create a canonical phys-0 manifest.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            path: { type: "string" },
+            id: { type: "string" },
+            name: { type: "string" },
+            kind: { type: "string" },
+            embodiment: { type: "string" },
+            format: { type: "string" },
+            metadata: { type: "object", additionalProperties: true }
+          },
+          required: ["path", "id"],
+          additionalProperties: false
+        }
+      },
+      {
+        name: "patch_asset",
+        description: "Append an explicit patch-history entry to an asset manifest and persist it in assets/registry.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            asset_id: { type: "string" },
+            patch: { type: "object", additionalProperties: true }
+          },
+          required: ["asset_id", "patch"],
+          additionalProperties: false
+        }
+      },
+      {
         name: "spawn_robot",
         description: "Spawn a robot asset as a generic phys-0 world entity. Controller connectivity is tracked separately.",
         inputSchema: {
@@ -1031,6 +1146,7 @@ export class Chem0Backend extends EventEmitter {
             pose: { type: "object", additionalProperties: true },
             backend: { type: "string" },
             controller: { type: "string" },
+            allow_unvalidated: { type: "boolean", default: false },
             metadata: { type: "object", additionalProperties: true }
           },
           required: ["world_id", "asset_id"],
@@ -1048,6 +1164,7 @@ export class Chem0Backend extends EventEmitter {
             variant: { type: "string" },
             pose: { type: "object", additionalProperties: true },
             static: { type: "boolean" },
+            allow_unvalidated: { type: "boolean", default: false },
             metadata: { type: "object", additionalProperties: true }
           },
           required: ["world_id", "asset_id"],
@@ -1186,6 +1303,16 @@ export class Chem0Backend extends EventEmitter {
         }
       },
       {
+        name: "disconnect_controller",
+        description: "Disconnect an entity controller adapter and mark the controller record disconnected.",
+        inputSchema: {
+          type: "object",
+          properties: { controller_id: { type: "string" } },
+          required: ["controller_id"],
+          additionalProperties: false
+        }
+      },
+      {
         name: "read_state",
         description: "Read the stored phys-0 entity state and associated controller records.",
         inputSchema: {
@@ -1206,6 +1333,42 @@ export class Chem0Backend extends EventEmitter {
             command: {}
           },
           required: ["entity_id", "command"],
+          additionalProperties: false
+        }
+      },
+      {
+        name: "start_sim",
+        description: "Start or record a simulation session for a world/backend pair.",
+        inputSchema: {
+          type: "object",
+          properties: { world_id: { type: "string" }, backend: { type: "string" }, session_id: { type: "string" } },
+          additionalProperties: false
+        }
+      },
+      {
+        name: "stop_sim",
+        description: "Stop or record stopping a simulation session.",
+        inputSchema: {
+          type: "object",
+          properties: { world_id: { type: "string" }, backend: { type: "string" }, session_id: { type: "string" } },
+          additionalProperties: false
+        }
+      },
+      {
+        name: "reset_sim",
+        description: "Reset or record resetting a simulation session.",
+        inputSchema: {
+          type: "object",
+          properties: { world_id: { type: "string" }, backend: { type: "string" }, session_id: { type: "string" } },
+          additionalProperties: false
+        }
+      },
+      {
+        name: "step_sim",
+        description: "Step or record stepping a simulation session.",
+        inputSchema: {
+          type: "object",
+          properties: { world_id: { type: "string" }, backend: { type: "string" }, session_id: { type: "string" }, dt_s: { type: "number" } },
           additionalProperties: false
         }
       },

@@ -1,0 +1,33 @@
+{
+  "id": "universal_robots/ur5e",
+  "name": "Universal Robots UR5e",
+  "kind": "robot",
+  "embodiment": "manipulator",
+  "source": {
+    "name": "Universal Robots ROS 2 Description",
+    "upstreamRepo": "https://github.com/UniversalRobots/Universal_Robots_ROS2_Description",
+    "vendorMaintained": true,
+    "notes": "P0 source record. Upstream files are not yet canonicalized or committed in phys-0."
+  },
+  "quality": "vendor_raw",
+  "formats": ["xacro", "urdf"],
+  "variants": {
+    "external_source": {
+      "descriptionPath": "docs/phys0-external-assets.md",
+      "descriptionFormat": "xacro",
+      "meshRoots": [],
+      "defaultFrame": "base_link",
+      "baseLink": "base_link",
+      "endEffectorFrame": "tool0",
+      "defaultController": "ros2_control",
+      "simBackends": ["gazebo"]
+    }
+  },
+  "protocols": ["ros2", "ros2_control", "gazebo"],
+  "patches": [],
+  "validation": {
+    "status": "failing",
+    "tests": ["xacro_expand", "xml_parse", "mesh_resolve", "joint_limits", "fk", "bbox", "collision_exists", "inertials_sane", "sim_spawn", "ros2_control_load"],
+    "failures": ["Source record only; upstream files have not been imported, patched, or validated in this repository."]
+  }
+}

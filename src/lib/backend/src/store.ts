@@ -445,6 +445,11 @@ export class Chem0Store {
     return rows.map((row) => this.physEntityFromRow(row));
   }
 
+  getWorldEntity(entityId: string): PhysEntity | null {
+    const row = this.query("select * from world_entities where id = ? limit 1", [entityId])[0];
+    return row ? this.physEntityFromRow(row) : null;
+  }
+
   addField(input: {
     worldId: string;
     kind: PhysFieldKind;
@@ -653,6 +658,16 @@ export class Chem0Store {
     ]);
     this.save();
     return controller;
+  }
+
+  updateControllerStatus(controllerId: string, status: string): EntityController {
+    const current = this.query("select * from entity_controllers where id = ? limit 1", [controllerId])[0];
+    if (!current) throw new Error(`Unknown controller_id: ${controllerId}`);
+    this.run("update entity_controllers set status = ?, updated_at = ? where id = ?", [status, now(), controllerId]);
+    this.save();
+    const updated = this.query("select * from entity_controllers where id = ? limit 1", [controllerId])[0];
+    if (!updated) throw new Error(`Unknown controller_id: ${controllerId}`);
+    return this.controllerFromRow(updated);
   }
 
   listEntityControllers(entityId?: string): EntityController[] {

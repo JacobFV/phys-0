@@ -41,6 +41,7 @@ const experimentName = document.querySelector<HTMLInputElement>("#experiment-nam
 const experimentsList = document.querySelector<HTMLUListElement>("#experiments-list")!;
 const robotsList = document.querySelector<HTMLUListElement>("#robots-list")!;
 const worldsList = document.querySelector<HTMLUListElement>("#worlds-list")!;
+const assetsList = document.querySelector<HTMLUListElement>("#assets-list")!;
 const artifactsList = document.querySelector<HTMLUListElement>("#artifacts-list")!;
 const experimentMeta = document.querySelector<HTMLPreElement>("#experiment-meta")!;
 const experimentNotes = document.querySelector<HTMLTextAreaElement>("#experiment-notes")!;
@@ -62,6 +63,7 @@ const confirmModalMessage = document.querySelector<HTMLParagraphElement>("#confi
 const confirmModalCancel = document.querySelector<HTMLButtonElement>("#confirm-modal-cancel")!;
 const confirmModalConfirm = document.querySelector<HTMLButtonElement>("#confirm-modal-confirm")!;
 const refreshWorldsBtn = document.querySelector<HTMLButtonElement>("#refresh-worlds")!;
+const refreshAssetsBtn = document.querySelector<HTMLButtonElement>("#refresh-assets")!;
 const virtualArmNameInput = document.querySelector<HTMLInputElement>("#virtual-arm-name")!;
 const createVirtualArmBtn = document.querySelector<HTMLButtonElement>("#create-virtual-arm")!;
 const setDefaultRobot = document.querySelector<HTMLButtonElement>("#set-default-robot")!;
@@ -78,6 +80,7 @@ const chatInput = document.querySelector<HTMLTextAreaElement>("#chat-input")!;
 const sendMessage = document.querySelector<HTMLButtonElement>("#send-message")!;
 const recordAudio = document.querySelector<HTMLButtonElement>("#record-audio")!;
 const metricGrid = document.querySelector<HTMLDivElement>("#metric-grid")!;
+const processGraph = document.querySelector<HTMLDivElement>("#process-graph")!;
 const metricsCatalog = document.querySelector<HTMLUListElement>("#metrics-catalog")!;
 const metricLogsList = document.querySelector<HTMLUListElement>("#metric-logs")!;
 const metricsGridHint = document.querySelector<HTMLSpanElement>("#metrics-grid-hint")!;
@@ -115,6 +118,8 @@ let experimentsCache: JsonObject[] = [];
 let worldsCache: JsonObject[] = [];
 let assignmentsCache: JsonObject[] = [];
 let virtualEntitiesCache: JsonObject[] = [];
+let physEntitiesCache: JsonObject[] = [];
+let assetsCache: JsonObject[] = [];
 let worldModalMode: "create" | "edit" = "create";
 let worldModalType: "physical" | "virtual" = "physical";
 let worldModalWorldId = "";
@@ -1120,6 +1125,95 @@ function renderWorldsList(): void {
   updateWorldPreviewCanvases();
 }
 
+function renderAssetsList(): void {
+  assetsList.replaceChildren();
+  if (assetsCache.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "list-empty";
+    empty.textContent = "No canonical assets loaded.";
+    assetsList.append(empty);
+    return;
+  }
+  for (const asset of assetsCache) {
+    const manifest = (asset.manifest ?? {}) as JsonObject;
+    const li = document.createElement("li");
+    li.className = "list-item asset-card";
+    const title = document.createElement("div");
+    title.className = "title";
+    title.textContent = String(asset.name ?? asset.id);
+    const sub = document.createElement("div");
+    sub.className = "sub";
+    const validation = (manifest.validation ?? {}) as JsonObject;
+    const protocols = Array.isArray(manifest.protocols) ? manifest.protocols.join(", ") : "none";
+    sub.textContent = `${String(asset.kind ?? "asset")} · ${String(asset.quality ?? "unknown")} · ${String(validation.status ?? "unknown")} · ${protocols}`;
+    const detail = document.createElement("div");
+    detail.className = "sub asset-detail";
+    const formats = Array.isArray(manifest.formats) ? manifest.formats.join(", ") : "";
+    detail.textContent = `${String(asset.id ?? "")}${formats ? ` · ${formats}` : ""}`;
+    li.append(title, sub, detail);
+    li.addEventListener("click", async () => {
+      const assetId = String(asset.id ?? "");
+      try {
+        const [manifestResult, validationResult] = await Promise.all([
+          window.chem0.callTool("get_asset_manifest", { asset_id: assetId }),
+          window.chem0.callTool("validate_asset", { asset_id: assetId })
+        ]);
+        show({ ...manifestResult, ...validationResult });
+      } catch (error) {
+        show({ asset_error: error instanceof Error ? error.message : String(error) });
+      }
+    });
+    assetsList.append(li);
+  }
+}
+
+async function refreshAssets(): Promise<void> {
+  const result = await window.chem0.callTool("list_asset_catalog", {});
+  assetsCache = (result.assets ?? []) as JsonObject[];
+  renderAssetsList();
+}
+
+async function renderProcessGraph(): Promise<void> {
+  processGraph.replaceChildren();
+  if (!selectedWorldId) return;
+  try {
+    const [exported, history] = await Promise.all([
+      window.chem0.callTool("export_world", { world_id: selectedWorldId }),
+      window.chem0.callTool("query_history", { world_id: selectedWorldId, limit: 12 })
+    ]);
+    const world = (exported.world ?? {}) as JsonObject;
+    const groups: Array<[string, JsonObject[]]> = [
+      ["Entities", (world.entities ?? []) as JsonObject[]],
+      ["Fields", (world.fields ?? []) as JsonObject[]],
+      ["Processes", (world.processes ?? []) as JsonObject[]],
+      ["Observations", (history.observations ?? []) as JsonObject[]],
+      ["Interventions", (history.interventions ?? []) as JsonObject[]]
+    ];
+    for (const [label, items] of groups) {
+      const section = document.createElement("section");
+      section.className = "process-graph-section";
+      const head = document.createElement("div");
+      head.className = "process-graph-head";
+      head.textContent = `${label} (${items.length})`;
+      section.append(head);
+      for (const item of items.slice(0, 8)) {
+        const row = document.createElement("button");
+        row.className = "process-graph-row";
+        row.type = "button";
+        row.textContent = `${String(item.kind ?? item.id ?? "item")} · ${String(item.id ?? item.timestamp ?? "")}`;
+        row.addEventListener("click", () => show(item));
+        section.append(row);
+      }
+      processGraph.append(section);
+    }
+  } catch (error) {
+    const empty = document.createElement("div");
+    empty.className = "list-empty";
+    empty.textContent = `Process graph unavailable: ${error instanceof Error ? error.message : String(error)}`;
+    processGraph.append(empty);
+  }
+}
+
 function startWorldInlineEdit(header: HTMLDivElement, title: HTMLDivElement, world: JsonObject): void {
   const id = String(world.id);
   const input = document.createElement("input");
@@ -1151,10 +1245,12 @@ async function refreshWorlds(): Promise<void> {
   worldsCache = (result.worlds ?? []) as JsonObject[];
   assignmentsCache = (result.assignments ?? []) as JsonObject[];
   virtualEntitiesCache = (result.virtual_entities ?? []) as JsonObject[];
+  physEntitiesCache = (result.phys_entities ?? []) as JsonObject[];
   if (!worldsCache.some((world) => String(world.id) === selectedWorldId)) {
     selectedWorldId = String(worldsCache[0]?.id ?? "world_physical_default");
   }
   renderWorldsList();
+  void renderProcessGraph();
 }
 
 function updateExperimentsListSelection(): void {
@@ -1224,6 +1320,7 @@ async function selectWorld(id: string, options: { matchExperiment?: boolean } = 
     renderPickerMenus();
   }
   void refreshRobots();
+  void renderProcessGraph();
 }
 
 async function createExperimentFromCurrentWorld(): Promise<void> {
@@ -1829,7 +1926,7 @@ async function boot(): Promise<void> {
   // catalog row and pinned 0–14 chart exist before the first sample arrives.
   registerMetric("pH", { min: 0, max: 14 });
   scheduleMetricRender(true);
-  const [tools] = await Promise.all([window.chem0.listTools(), refreshWorlds()]);
+  const [tools] = await Promise.all([window.chem0.listTools(), refreshWorlds(), refreshAssets()]);
   await refreshExperiments();
   const defaultRobot = await window.chem0.callTool("get_default_robot", { world_id: selectedWorldId });
   defaultRobotId = typeof defaultRobot.robot_id === "string" ? defaultRobot.robot_id : "";
@@ -1849,6 +1946,10 @@ worldSelect.addEventListener("change", () => void selectWorld(worldSelect.value,
 refreshWorldsBtn.addEventListener("click", async () => {
   await refreshWorlds();
   void refreshRobots();
+});
+refreshAssetsBtn.addEventListener("click", async () => {
+  await refreshAssets();
+  void renderProcessGraph();
 });
 
 experimentPickerButton.addEventListener("click", () => {
