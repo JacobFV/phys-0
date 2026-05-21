@@ -69,7 +69,8 @@ async function main(): Promise<void> {
           "phys0 world spawn-object <asset_id> --world-id <id>",
           "phys0 world add-field <kind> --world-id <id> --domain '{...}'",
           "phys0 world add-process <kind> --world-id <id> --inputs a,b --outputs c",
-          "phys0 sim start|step|reset|stop --world-id <id> [--backend gazebo]"
+          "phys0 sim list",
+          "phys0 sim start|pause|resume|step|reset|stop --world-id <id> [--backend gazebo]"
         ]
       });
       return;
@@ -148,12 +149,17 @@ async function main(): Promise<void> {
       return;
     }
 
-    if (scope === "sim" && ["start", "step", "reset", "stop"].includes(action ?? "")) {
+    if (scope === "sim" && action === "list") {
+      print(await backend.callTool("list_sim_sessions", {}));
+      return;
+    }
+    if (scope === "sim" && ["start", "pause", "resume", "step", "reset", "stop"].includes(action ?? "")) {
       print(await backend.callTool(`${action}_sim`, json({
         world_id: flagString(parsed.flags, "worldId"),
         backend: flagString(parsed.flags, "backend"),
         session_id: flagString(parsed.flags, "sessionId"),
-        dt_s: Number(flagString(parsed.flags, "dtS") ?? "0")
+        dt_s: Number(flagString(parsed.flags, "dtS") ?? "0"),
+        seed: flagString(parsed.flags, "seed")
       })));
       return;
     }

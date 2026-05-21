@@ -17,9 +17,9 @@ Last updated: 2026-05-21
 
 | # | Feature | Priority | Depends on | Status |
 |---|---------|----------|-----------|--------|
-| 1 | Rapier physics migration | P0 (foundation) | — | `[ ]` |
-| 2 | Deterministic seeded simulation | P0 | F1 | `[ ]` |
-| 3 | Concurrent multi-world simulation | P0 | F1, F2 | `[ ]` |
+| 1 | Rapier physics migration | P0 (foundation) | — | `[~]` |
+| 2 | Deterministic seeded simulation | P0 | F1 | `[x]` |
+| 3 | Concurrent multi-world simulation | P0 | F1, F2 | `[x]` |
 | 4 | Flying / aerial dynamics | P1 | F1 | `[ ]` |
 | 5 | Chemical reactions runtime | P1 | F1 | `[ ]` |
 | 6 | Real sensor simulation | P1 | F1, F3 | `[ ]` |
@@ -51,20 +51,20 @@ collisions, or articulated robots.
       promise, no bundler-specific WASM-loader config, identical behavior in the
       Electron renderer and headless Node. Headless physics IS in scope (F3
       world stepping, F6 deterministic sensor rendering run outside the renderer).
-- [ ] Add Rapier to `package.json`; wire WASM asset into the Electron build.
-- [ ] Define a physics abstraction layer so the world/entity schema is not
+- [x] Add Rapier to `package.json`; wire WASM asset into the Electron build.
+- [x] Define a physics abstraction layer so the world/entity schema is not
       coupled to Rapier types directly (`src/lib/backend/src/types.ts` regimes).
-- [ ] Map `PhysEntityKind` / `DynamicalRegimes` → Rapier rigid body types
+- [x] Map `PhysEntityKind` / `DynamicalRegimes` → Rapier rigid body types
       (dynamic, kinematic, fixed) and colliders.
-- [ ] Translate existing collision shapes (box, cylinder — `virtual-world3d.mjs`
+- [x] Translate existing collision shapes (box, cylinder — `virtual-world3d.mjs`
       lines ~1262-1318) to Rapier colliders; add mesh/convex-hull colliders.
 - [ ] Articulated bodies: map robot joints (SO-101, URDF assets) to Rapier
       joints / multibody for real arm dynamics.
-- [ ] Fixed-timestep stepping loop; decouple physics tick from render frame.
-- [ ] Port `settleRigidBodies()` callers to the Rapier step; remove the custom
+- [x] Fixed-timestep stepping loop; decouple physics tick from render frame.
+- [x] Port `settleRigidBodies()` callers to the Rapier step; remove the custom
       settler once parity is verified.
-- [ ] Sync Rapier transforms back to THREE.js scene objects each frame.
-- [ ] Regression check: SO-101 spawn, pose, collision still behave (preserve
+- [x] Sync Rapier transforms back to THREE.js scene objects each frame.
+- [x] Regression check: SO-101 spawn, pose, collision still behave (preserve
       chem-0 workflows per the ledger).
 
 **Key files.** `src/apps/electron/src/renderer/virtual-world3d.mjs`,
@@ -83,14 +83,14 @@ non-deterministic.
 
 **TODOs.**
 
-- [ ] Add a `seed` field to the world / experiment schema and SQLite store.
-- [ ] Confirm Rapier determinism mode (fixed timestep, deterministic flag,
+- [x] Add a `seed` field to the world / experiment schema and SQLite store.
+- [x] Confirm Rapier determinism mode (fixed timestep, deterministic flag,
       consistent collider insertion order).
-- [ ] Replace any `Math.random()` in sim paths with a seeded PRNG.
-- [ ] Make stepping fixed-timestep with accumulator (no frame-rate coupling).
-- [ ] Ensure deterministic entity iteration order (sorted by id, not insertion).
-- [ ] Surface seed in the CLI (`src/apps/*/cli`) and Electron world editor.
-- [ ] Reproducibility test: run the same seed twice, assert identical end state.
+- [x] Replace any `Math.random()` in sim paths with a seeded PRNG.
+- [x] Make stepping fixed-timestep with accumulator (no frame-rate coupling).
+- [x] Ensure deterministic entity iteration order (sorted by id, not insertion).
+- [x] Surface seed in the CLI (`src/apps/*/cli`) and Electron world editor.
+- [x] Reproducibility test: run the same seed twice, assert identical end state.
 
 **Key files.** `src/lib/backend/src/store.ts`, `src/lib/backend/src/types.ts`,
 CLI package, virtual-world renderer.
@@ -106,18 +106,18 @@ CLI package, virtual-world renderer.
 
 **TODOs.**
 
-- [ ] One Rapier `World` instance per simulated world; isolate state.
-- [ ] Scheduler/loop that steps N worlds: **DECIDED — independent per-world
+- [x] One Rapier `World` instance per simulated world; isolate state.
+- [x] Scheduler/loop that steps N worlds: **DECIDED — independent per-world
       clocks**, each world keeps its own seed + fixed timestep from F2.
-- [ ] Resource model: **DECIDED — one physics worker thread per world** (small
+- [x] Resource model: **DECIDED — one physics worker thread per world** (small
       pool), main thread renders only the focused world; non-focused worlds step
       headless in workers. **Default cap: 8 concurrent worlds**, configurable;
       worlds beyond the cap pause. Throttle inactive workers.
-- [ ] Per-world entity/field/process isolation in the backend
+- [x] Per-world entity/field/process isolation in the backend
       (`backend.ts`, `store.ts`).
-- [ ] Electron UI: select / switch / view multiple active worlds.
-- [ ] Lifecycle: create, pause, resume, step, destroy per world.
-- [ ] Test: two worlds with different seeds run independently and reproducibly.
+- [x] Electron UI: select / switch / view multiple active worlds.
+- [x] Lifecycle: create, pause, resume, step, destroy per world.
+- [x] Test: two worlds with different seeds run independently and reproducibly.
 
 **Key files.** `src/lib/backend/src/store.ts` (`worlds`,
 `robot_world_assignments`), `src/lib/backend/src/backend.ts`, renderer.
