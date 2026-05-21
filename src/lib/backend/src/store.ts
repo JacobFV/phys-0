@@ -464,6 +464,25 @@ export class Chem0Store {
     return row ? this.physEntityFromRow(row) : null;
   }
 
+  updateWorldEntity(input: { entityId: string; state?: JsonObject; pose?: JsonObject | null; metadata?: JsonObject }): PhysEntity {
+    const current = this.getWorldEntity(input.entityId);
+    if (!current) throw new Error(`Unknown entity_id: ${input.entityId}`);
+    const state = input.state ?? current.state;
+    const pose = input.pose === undefined ? current.pose : input.pose;
+    const metadata = input.metadata ?? current.metadata;
+    this.run("update world_entities set state_json = ?, pose_json = ?, metadata_json = ?, updated_at = ? where id = ?", [
+      JSON.stringify(state),
+      pose == null ? null : JSON.stringify(pose),
+      JSON.stringify(metadata),
+      now(),
+      input.entityId
+    ]);
+    this.save();
+    const updated = this.getWorldEntity(input.entityId);
+    if (!updated) throw new Error(`Unknown entity_id: ${input.entityId}`);
+    return updated;
+  }
+
   addField(input: {
     worldId: string;
     kind: PhysFieldKind;

@@ -8,6 +8,7 @@
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.19.3",
     "openai": "^6.9.1",
     "sql.js": "^1.12.0"
   },

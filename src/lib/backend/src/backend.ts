@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { Worker } from "node:worker_threads";
 import OpenAI from "openai";
 import { AudioService } from "./audio";
 import { AssetRegistry } from "./assetRegistry";
@@ -20,11 +21,13 @@ import {
   requireStringArray
 } from "./physSchema";
 import { ExternalRuntimeAdapter, LeRobotAdapter, parseRobotCommand, type PhysProtocolAdapter } from "./protocolAdapters";
+import { poseToJson } from "./rapierPhysics";
 import { Chem0Store, DEFAULT_PHYSICAL_WORLD_ID } from "./store";
-import type { AssetFormat, AssetKind, AssetManifest, Experiment, JsonObject, JsonValue, Protocol, RobotEmbodiment, RobotKind, WorldType } from "./types";
+import type { AssetFormat, AssetKind, AssetManifest, Experiment, JsonObject, JsonValue, PhysEntity, Protocol, RobotEmbodiment, RobotKind, WorldType } from "./types";
 
 const DEFAULT_MODEL = "gpt-5.5";
 const MAX_AGENT_STEPS = 8;
+const DEFAULT_SIM_WORLD_CAP = 8;
 const ROBOT_TOOL_NAMES = new Set([
   "connect_so101",
   "observe",
@@ -38,12 +41,43 @@ const ROBOT_TOOL_NAMES = new Set([
   "disconnect"
 ]);
 
+type SimStatus = "running" | "paused" | "stopped" | "error";
+
+type SimWorkerResponse = {
+  world_id: string;
+  seed: number;
+  fixed_time_step_s: number;
+  elapsed_s: number;
+  step_count: number;
+  snapshot?: {
+    poses?: Record<string, { position: [number, number, number]; orientation: [number, number, number, number] }>;
+    contacts?: Array<{ a: string; b: string }>;
+  };
+};
+
+type SimSession = {
+  id: string;
+  worldId: string;
+  backend: string;
+  seed: number;
+  fixedTimeStepS: number;
+  status: SimStatus;
+  worker: Worker;
+  requestId: number;
+  pending: Map<number, { resolve: (value: SimWorkerResponse) => void; reject: (error: Error) => void }>;
+  startedAt: string;
+  updatedAt: string;
+  lastSnapshot: SimWorkerResponse | null;
+};
+
 export class Chem0Backend extends EventEmitter {
   readonly store: Chem0Store;
   readonly bridge: PythonBridge;
   readonly audio: AudioService;
   readonly assetRegistry: AssetRegistry;
   private readonly adapters: Map<Protocol, PhysProtocolAdapter>;
+  private readonly simSessions = new Map<string, SimSession>();
+  private readonly maxSimWorlds: number;
   private initialized = false;
 
   constructor(readonly repoRoot: string, dataDir = path.join(repoRoot, "data")) {
@@ -53,6 +87,7 @@ export class Chem0Backend extends EventEmitter {
     this.audio = new AudioService(dataDir);
     this.bridge = new PythonBridge(repoRoot);
     this.assetRegistry = new AssetRegistry(repoRoot);
+    this.maxSimWorlds = Math.max(1, Number(process.env.PHYS0_MAX_SIM_WORLDS ?? DEFAULT_SIM_WORLD_CAP));
     this.adapters = new Map<Protocol, PhysProtocolAdapter>([
       ["lerobot", new LeRobotAdapter((tool, toolArgs) => this.executeTool(tool, toolArgs))],
       ["ros2", new ExternalRuntimeAdapter("ros2", "ros2", ["raw"])],
@@ -406,6 +441,11 @@ export class Chem0Backend extends EventEmitter {
     if (name === "list_protocol_adapters") {
       return { adapters: this.protocolAdapters() as unknown as JsonObject[] };
     }
+    if (name === "list_sim_sessions") {
+      return {
+        sessions: Array.from(this.simSessions.values()).map((session) => this.simSessionPayload(session, session.lastSnapshot)) as unknown as JsonObject[]
+      };
+    }
     if (name === "connect_controller") {
       const protocol = requireEnum(args.protocol ?? "none", PROTOCOLS, "protocol");
       const controller = this.store.connectController({
@@ -453,7 +493,7 @@ export class Chem0Backend extends EventEmitter {
       if (adapter) await adapter.disconnect();
       return { controller: this.store.updateControllerStatus(controllerId, "disconnected") as unknown as JsonObject };
     }
-    if (name === "start_sim" || name === "stop_sim" || name === "reset_sim" || name === "step_sim") {
+    if (["start_sim", "pause_sim", "resume_sim", "stop_sim", "reset_sim", "step_sim"].includes(name)) {
       return this.handleSimTool(name, args);
     }
     if (name === "list_experiment_artifacts") {
@@ -666,6 +706,10 @@ export class Chem0Backend extends EventEmitter {
   }
 
   stop(): void {
+    for (const session of this.simSessions.values()) {
+      void session.worker.terminate();
+    }
+    this.simSessions.clear();
     this.bridge.stop();
   }
 
@@ -863,26 +907,226 @@ export class Chem0Backend extends EventEmitter {
   }
 
   private async handleSimTool(name: string, args: JsonObject): Promise<JsonObject> {
+    if (name === "start_sim") return this.startSim(args);
+    if (name === "pause_sim") return this.pauseSim(args);
+    if (name === "resume_sim") return this.resumeSim(args);
+    if (name === "step_sim") return this.stepSim(args);
+    if (name === "reset_sim") return this.resetSim(args);
+    if (name === "stop_sim") return this.stopSim(args);
+    throw new Error(`Unknown simulation tool: ${name}`);
+  }
+
+  private async startSim(args: JsonObject): Promise<JsonObject> {
+    const worldId = this.requiredWorldId(args);
+    const world = this.store.getWorld(worldId);
+    if (!world) throw new Error(`Unknown world_id: ${worldId}`);
     const backend = optionalEnum(args.backend, PHYS_BACKENDS, "sim backend") ?? "custom";
-    const sessionId = typeof args.session_id === "string" && args.session_id.trim() ? args.session_id : `sim_${backend}_${Date.now().toString(36)}`;
-    const payload = {
-      session_id: sessionId,
+    const sessionId = typeof args.session_id === "string" && args.session_id.trim() ? args.session_id : `sim_${worldId}`;
+    const existing = this.simSessions.get(sessionId);
+    if (existing && existing.status !== "stopped") throw new Error(`Simulation session already exists: ${sessionId}`);
+    this.enforceSimWorldCap(worldId);
+    const fixedTimeStepS = Number(args.dt_s ?? args.fixed_time_step_s ?? 1 / 60);
+    const session = this.createSimSession({
+      id: sessionId,
+      worldId,
       backend,
-      world_id: typeof args.world_id === "string" ? args.world_id : null,
-      status: name === "start_sim" ? "started" : name === "stop_sim" ? "stopped" : name === "reset_sim" ? "reset" : "stepped",
-      step_dt_s: typeof args.dt_s === "number" ? args.dt_s : null,
-      note: "Simulation lifecycle is recorded in phys-0; backend-specific process launch is delegated to the selected runtime adapter."
+      seed: Number(args.seed ?? world.seed),
+      fixedTimeStepS: Number.isFinite(fixedTimeStepS) && fixedTimeStepS > 0 ? fixedTimeStepS : 1 / 60
+    });
+    this.simSessions.set(session.id, session);
+    const result = await this.sendSimRequest(session, {
+      op: "init",
+      worldId,
+      seed: session.seed,
+      fixedTimeStepS: session.fixedTimeStepS,
+      entities: this.store.listWorldEntities(worldId)
+    });
+    session.lastSnapshot = result;
+    this.recordSimLifecycle(worldId, "start_sim", session, result);
+    return this.simSessionPayload(session, result);
+  }
+
+  private async stepSim(args: JsonObject): Promise<JsonObject> {
+    const session = this.resolveSimSession(args);
+    if (session.status !== "running") throw new Error(`Simulation session is not running: ${session.id}`);
+    const dtS = Number(args.dt_s ?? session.fixedTimeStepS);
+    const result = await this.sendSimRequest(session, { op: "step", dtS: Number.isFinite(dtS) && dtS > 0 ? dtS : session.fixedTimeStepS });
+    session.lastSnapshot = result;
+    session.updatedAt = new Date().toISOString();
+    this.applySimSnapshot(session.worldId, result);
+    this.recordSimLifecycle(session.worldId, "step_sim", session, result);
+    return this.simSessionPayload(session, result);
+  }
+
+  private async pauseSim(args: JsonObject): Promise<JsonObject> {
+    const session = this.resolveSimSession(args);
+    if (session.status !== "running") throw new Error(`Simulation session is not running: ${session.id}`);
+    const snapshot = await this.sendSimRequest(session, { op: "snapshot" });
+    session.status = "paused";
+    session.updatedAt = new Date().toISOString();
+    session.lastSnapshot = snapshot;
+    this.recordSimLifecycle(session.worldId, "pause_sim", session, snapshot);
+    return this.simSessionPayload(session, snapshot);
+  }
+
+  private async resumeSim(args: JsonObject): Promise<JsonObject> {
+    const sessionId = typeof args.session_id === "string" && args.session_id.trim() ? args.session_id : "";
+    const session = sessionId
+      ? this.simSessions.get(sessionId)
+      : Array.from(this.simSessions.values()).find((item) => item.worldId === this.requiredWorldId(args) && item.status === "paused");
+    if (!session) throw new Error("Unknown paused simulation session.");
+    if (session.status !== "paused") throw new Error(`Simulation session is not paused: ${session.id}`);
+    const snapshot = await this.sendSimRequest(session, { op: "snapshot" });
+    session.status = "running";
+    session.updatedAt = new Date().toISOString();
+    session.lastSnapshot = snapshot;
+    this.recordSimLifecycle(session.worldId, "resume_sim", session, snapshot);
+    return this.simSessionPayload(session, snapshot);
+  }
+
+  private async resetSim(args: JsonObject): Promise<JsonObject> {
+    const session = this.resolveSimSession(args);
+    const world = this.store.getWorld(session.worldId);
+    const seed = Number(args.seed ?? world?.seed ?? session.seed);
+    const result = await this.sendSimRequest(session, {
+      op: "reset",
+      seed,
+      entities: this.store.listWorldEntities(session.worldId)
+    });
+    session.seed = result.seed;
+    session.status = "running";
+    session.updatedAt = new Date().toISOString();
+    session.lastSnapshot = result;
+    this.applySimSnapshot(session.worldId, result);
+    this.recordSimLifecycle(session.worldId, "reset_sim", session, result);
+    return this.simSessionPayload(session, result);
+  }
+
+  private async stopSim(args: JsonObject): Promise<JsonObject> {
+    const session = this.resolveSimSession(args);
+    const snapshot = await this.sendSimRequest(session, { op: "snapshot" }).catch(() => session.lastSnapshot);
+    await this.sendSimRequest(session, { op: "destroy" }).catch(() => null);
+    await session.worker.terminate();
+    session.status = "stopped";
+    session.updatedAt = new Date().toISOString();
+    this.simSessions.delete(session.id);
+    if (snapshot) this.recordSimLifecycle(session.worldId, "stop_sim", session, snapshot);
+    return this.simSessionPayload(session, snapshot ?? session.lastSnapshot);
+  }
+
+  private createSimSession(input: { id: string; worldId: string; backend: string; seed: number; fixedTimeStepS: number }): SimSession {
+    const worker = new Worker(path.join(__dirname, "simWorker.js"));
+    const pending = new Map<number, { resolve: (value: SimWorkerResponse) => void; reject: (error: Error) => void }>();
+    const session: SimSession = {
+      id: input.id,
+      worldId: input.worldId,
+      backend: input.backend,
+      seed: input.seed,
+      fixedTimeStepS: input.fixedTimeStepS,
+      status: "running",
+      worker,
+      requestId: 0,
+      pending,
+      startedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      lastSnapshot: null
     };
-    if (payload.world_id) {
-      this.store.recordIntervention({
-        worldId: payload.world_id,
-        targetIds: [],
-        kind: "environment_change",
-        payload: payload as unknown as JsonValue,
-        metadata: { tool: name }
+    worker.on("message", (message: { id?: number; ok?: boolean; result?: SimWorkerResponse; error?: string }) => {
+      const id = Number(message.id);
+      const waiter = pending.get(id);
+      if (!waiter) return;
+      pending.delete(id);
+      if (message.ok) waiter.resolve(message.result as SimWorkerResponse);
+      else waiter.reject(new Error(message.error ?? "Simulation worker request failed."));
+    });
+    worker.on("error", (error) => {
+      session.status = "error";
+      for (const [, waiter] of pending) waiter.reject(error);
+      pending.clear();
+    });
+    return session;
+  }
+
+  private sendSimRequest(session: SimSession, payload: Record<string, unknown>): Promise<SimWorkerResponse> {
+    const id = ++session.requestId;
+    return new Promise((resolve, reject) => {
+      session.pending.set(id, { resolve, reject });
+      session.worker.postMessage({ id, ...payload });
+    });
+  }
+
+  private applySimSnapshot(worldId: string, result: SimWorkerResponse): void {
+    const poses = result.snapshot?.poses ?? {};
+    for (const [entityId, pose] of Object.entries(poses).sort(([a], [b]) => a.localeCompare(b))) {
+      const entity = this.store.getWorldEntity(entityId);
+      if (!entity || entity.world_id !== worldId) continue;
+      this.store.updateWorldEntity({
+        entityId,
+        pose: poseToJson(pose),
+        state: { ...entity.state, sim: { seed: result.seed, step_count: result.step_count, elapsed_s: result.elapsed_s } }
       });
     }
-    return payload as unknown as JsonObject;
+    if ((result.snapshot?.contacts ?? []).length > 0) {
+      this.store.recordObservation({
+        worldId,
+        sourceId: "simulation",
+        kind: "state_estimate",
+        value: { contacts: result.snapshot?.contacts ?? [], step_count: result.step_count } as JsonValue,
+        metadata: { simulator: "rapier" }
+      });
+    }
+  }
+
+  private recordSimLifecycle(worldId: string, tool: string, session: SimSession, result: SimWorkerResponse): void {
+    this.store.recordIntervention({
+      worldId,
+      targetIds: [],
+      kind: "environment_change",
+      payload: this.simSessionPayload(session, result) as unknown as JsonValue,
+      metadata: { tool, simulator: "rapier" }
+    });
+  }
+
+  private simSessionPayload(session: SimSession, result: SimWorkerResponse | null): JsonObject {
+    return {
+      session_id: session.id,
+      world_id: session.worldId,
+      backend: session.backend,
+      status: session.status,
+      seed: result?.seed ?? session.seed,
+      fixed_time_step_s: result?.fixed_time_step_s ?? session.fixedTimeStepS,
+      elapsed_s: result?.elapsed_s ?? session.lastSnapshot?.elapsed_s ?? 0,
+      step_count: result?.step_count ?? session.lastSnapshot?.step_count ?? 0,
+      snapshot: (result?.snapshot ?? session.lastSnapshot?.snapshot ?? {}) as unknown as JsonObject,
+      worker: { mode: "worker_thread", max_worlds: this.maxSimWorlds },
+      started_at: session.startedAt,
+      updated_at: session.updatedAt
+    };
+  }
+
+  private resolveSimSession(args: JsonObject): SimSession {
+    const sessionId = typeof args.session_id === "string" && args.session_id.trim() ? args.session_id : "";
+    if (sessionId) {
+      const session = this.simSessions.get(sessionId);
+      if (!session) throw new Error(`Unknown simulation session: ${sessionId}`);
+      return session;
+    }
+    const worldId = this.requiredWorldId(args);
+    const sessions = Array.from(this.simSessions.values()).filter((session) => session.worldId === worldId && session.status !== "stopped");
+    if (sessions.length !== 1) throw new Error(`Expected exactly one simulation session for world_id ${worldId}; found ${sessions.length}.`);
+    return sessions[0];
+  }
+
+  private requiredWorldId(args: JsonObject): string {
+    const worldId = typeof args.world_id === "string" && args.world_id.trim() ? args.world_id : "";
+    if (!worldId) throw new Error("Simulation tool requires world_id.");
+    return worldId;
+  }
+
+  private enforceSimWorldCap(nextWorldId: string): void {
+    const activeWorlds = new Set(Array.from(this.simSessions.values()).filter((session) => session.status === "running").map((session) => session.worldId));
+    activeWorlds.add(nextWorldId);
+    if (activeWorlds.size > this.maxSimWorlds) throw new Error(`Concurrent simulated world cap exceeded: ${activeWorlds.size}/${this.maxSimWorlds}.`);
   }
 
   private backendTools(): JsonObject[] {
@@ -1340,37 +1584,72 @@ export class Chem0Backend extends EventEmitter {
       },
       {
         name: "start_sim",
-        description: "Start or record a simulation session for a world/backend pair.",
+        description: "Start a deterministic worker-thread simulation session for a world/backend pair.",
         inputSchema: {
           type: "object",
-          properties: { world_id: { type: "string" }, backend: { type: "string" }, session_id: { type: "string" } },
+          properties: {
+            world_id: { type: "string" },
+            backend: { type: "string" },
+            session_id: { type: "string" },
+            seed: { type: ["number", "string"] },
+            dt_s: { type: "number" },
+            fixed_time_step_s: { type: "number" }
+          },
+          required: ["world_id"],
           additionalProperties: false
         }
       },
       {
         name: "stop_sim",
-        description: "Stop or record stopping a simulation session.",
+        description: "Stop a running simulation session and terminate its worker.",
         inputSchema: {
           type: "object",
           properties: { world_id: { type: "string" }, backend: { type: "string" }, session_id: { type: "string" } },
+          additionalProperties: false
+        }
+      },
+      {
+        name: "pause_sim",
+        description: "Pause a running simulation session without terminating its worker.",
+        inputSchema: {
+          type: "object",
+          properties: { world_id: { type: "string" }, session_id: { type: "string" } },
+          additionalProperties: false
+        }
+      },
+      {
+        name: "resume_sim",
+        description: "Resume a paused simulation session.",
+        inputSchema: {
+          type: "object",
+          properties: { world_id: { type: "string" }, session_id: { type: "string" } },
           additionalProperties: false
         }
       },
       {
         name: "reset_sim",
-        description: "Reset or record resetting a simulation session.",
+        description: "Reset a running simulation session from current world entities.",
         inputSchema: {
           type: "object",
-          properties: { world_id: { type: "string" }, backend: { type: "string" }, session_id: { type: "string" } },
+          properties: { world_id: { type: "string" }, backend: { type: "string" }, session_id: { type: "string" }, seed: { type: ["number", "string"] } },
           additionalProperties: false
         }
       },
       {
         name: "step_sim",
-        description: "Step or record stepping a simulation session.",
+        description: "Step a running deterministic simulation session and sync poses into world_entities.",
         inputSchema: {
           type: "object",
           properties: { world_id: { type: "string" }, backend: { type: "string" }, session_id: { type: "string" }, dt_s: { type: "number" } },
+          additionalProperties: false
+        }
+      },
+      {
+        name: "list_sim_sessions",
+        description: "List active in-process simulation sessions and their latest snapshots.",
+        inputSchema: {
+          type: "object",
+          properties: {},
           additionalProperties: false
         }
       },
