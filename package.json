@@ -21,5 +21,8 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.19.3"
   }
 }

@@ -73,6 +73,7 @@ const subtitleEl = document.querySelector<HTMLElement>("#vw-subtitle")!;
 const assetList = document.querySelector<HTMLUListElement>("#vw-asset-list")!;
 const refreshBtn = document.querySelector<HTMLButtonElement>("#vw-refresh")!;
 const worldNameInput = document.querySelector<HTMLInputElement>("#vw-world-name")!;
+const worldSeedInput = document.querySelector<HTMLInputElement>("#vw-world-seed")!;
 const saveWorldBtn = document.querySelector<HTMLButtonElement>("#vw-save-world")!;
 const selectedEmpty = document.querySelector<HTMLDivElement>("#vw-selected-empty")!;
 const selectedForm = document.querySelector<HTMLDivElement>("#vw-selected-form")!;
@@ -264,6 +265,7 @@ function render(): void {
     titleEl.textContent = String(world.name ?? "Virtual world");
     subtitleEl.textContent = String(world.id ?? worldId);
     worldNameInput.value = String(world.name ?? "");
+    worldSeedInput.value = String(world.seed ?? (world.metadata as JsonObject | undefined)?.seed ?? "");
   }
   renderAssets();
   renderSelected();
@@ -395,7 +397,11 @@ for (const btn of document.querySelectorAll<HTMLButtonElement>("[data-create]"))
 
 refreshBtn.addEventListener("click", () => void refresh());
 saveWorldBtn.addEventListener("click", async () => {
-  await chem0.callTool("update_world", { world_id: worldId, name: worldNameInput.value.trim() || "Virtual world", metadata: (world?.metadata as JsonObject) ?? {} });
+  await chem0.callTool("update_world", {
+    world_id: worldId,
+    name: worldNameInput.value.trim() || "Virtual world",
+    metadata: { ...((world?.metadata as JsonObject) ?? {}), seed: worldSeedInput.value.trim() }
+  });
   await refresh();
 });
 

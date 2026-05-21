@@ -37,6 +37,7 @@ const vendorOut = join(out, "vendor");
 mkdirSync(vendorOut, { recursive: true });
 copyFileSync(join(repoRoot, "node_modules", "three", "build", "three.module.js"), join(vendorOut, "three.module.js"));
 copyFileSync(join(repoRoot, "node_modules", "three", "build", "three.core.js"), join(vendorOut, "three.core.js"));
+copyFileSync(join(repoRoot, "node_modules", "@dimforge", "rapier3d-compat", "rapier.mjs"), join(vendorOut, "rapier3d-compat.mjs"));
 copyFileSync(
   join(repoRoot, "node_modules", "three", "examples", "jsm", "loaders", "STLLoader.js"),
   join(vendorOut, "STLLoader.js")

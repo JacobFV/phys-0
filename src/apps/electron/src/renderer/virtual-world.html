@@ -94,6 +94,10 @@
                   <label for="vw-world-name">Name</label>
                   <input id="vw-world-name" />
                 </div>
+                <div class="vw-field">
+                  <label for="vw-world-seed">Seed</label>
+                  <input id="vw-world-seed" inputmode="numeric" />
+                </div>
                 <button id="vw-save-world" class="primary">Save world</button>
               </section>
             </div>
@@ -150,7 +154,8 @@
     <script type="importmap">
       {
         "imports": {
-          "three": "./vendor/three.module.js"
+          "three": "./vendor/three.module.js",
+          "@dimforge/rapier3d-compat": "./vendor/rapier3d-compat.mjs"
         }
       }
     </script>
