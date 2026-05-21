@@ -20,7 +20,7 @@ Last updated: 2026-05-21
 | 1 | Rapier physics migration | P0 (foundation) | — | `[~]` |
 | 2 | Deterministic seeded simulation | P0 | F1 | `[x]` |
 | 3 | Concurrent multi-world simulation | P0 | F1, F2 | `[x]` |
-| 4 | Flying / aerial dynamics | P1 | F1 | `[ ]` |
+| 4 | Flying / aerial dynamics | P1 | F1 | `[~]` |
 | 5 | Chemical reactions runtime | P1 | F1 | `[ ]` |
 | 6 | Real sensor simulation | P1 | F1, F3 | `[ ]` |
 | 7 | Spatial / 3D audio | P2 | F1, F6 | `[ ]` |
@@ -134,13 +134,13 @@ body. No thrust, lift, or aerial control.
 
 **TODOs.**
 
-- [ ] Decide fidelity: simple force-based thrust vs full quadrotor rotor model.
-- [ ] Add aerial dynamics for `drone` embodiment (forces/torques via Rapier).
-- [ ] Per-entity gravity scale / gravity toggle.
-- [ ] Flight control input path (manual + programmatic / adapter-driven).
-- [ ] Integrate with MAVLink adapter (already listed in ledger) for drone cmd.
+- [x] Decide fidelity: simple force-based thrust vs full quadrotor rotor model.
+- [x] Add aerial dynamics for `drone` embodiment (forces/torques via Rapier).
+- [x] Per-entity gravity scale / gravity toggle.
+- [x] Flight control input path (manual + programmatic / adapter-driven).
+- [x] Integrate with MAVLink adapter (already listed in ledger) for drone cmd.
 - [ ] Drone inspector UI panel (ledger already calls for "drone inspector").
-- [ ] Test: PX4 X500 takeoff-hover-land.
+- [x] Test: PX4 X500 takeoff-hover-land.
 
 **Key files.** `assets/registry/robots/p0/px4_x500.json`,
 `src/lib/backend/src/types.ts` (embodiment), protocol adapters.

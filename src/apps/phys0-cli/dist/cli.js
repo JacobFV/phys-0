@@ -67,7 +67,8 @@ async function main() {
                     "phys0 world add-field <kind> --world-id <id> --domain '{...}'",
                     "phys0 world add-process <kind> --world-id <id> --inputs a,b --outputs c",
                     "phys0 sim list",
-                    "phys0 sim start|pause|resume|step|reset|stop --world-id <id> [--backend gazebo]"
+                    "phys0 sim start|pause|resume|step|reset|stop --world-id <id> [--backend gazebo]",
+                    "phys0 sim aerial-control <entity_id> --mode takeoff --target-altitude-m 1.2 [--session-id <id>]"
                 ]
             });
             return;
@@ -145,6 +146,18 @@ async function main() {
         }
         if (scope === "sim" && action === "list") {
             print(await backend.callTool("list_sim_sessions", {}));
+            return;
+        }
+        if (scope === "sim" && action === "aerial-control") {
+            print(await backend.callTool("set_aerial_control", json({
+                entity_id: arg,
+                world_id: flagString(parsed.flags, "worldId"),
+                session_id: flagString(parsed.flags, "sessionId"),
+                mode: flagString(parsed.flags, "mode"),
+                thrust_n: Number(flagString(parsed.flags, "thrustN") ?? "NaN"),
+                target_altitude_m: Number(flagString(parsed.flags, "targetAltitudeM") ?? "NaN"),
+                yaw_rate_rad_s: Number(flagString(parsed.flags, "yawRateRadS") ?? "NaN")
+            })));
             return;
         }
         if (scope === "sim" && ["start", "pause", "resume", "step", "reset", "stop"].includes(action ?? "")) {
