@@ -1,0 +1,66 @@
+{
+  "id": "so_arm/so101",
+  "name": "SO-101 Follower Arm",
+  "kind": "robot",
+  "embodiment": "manipulator",
+  "source": {
+    "name": "TheRobotStudio SO-ARM100 / Hugging Face LeRobot",
+    "upstreamRepo": "https://github.com/TheRobotStudio/SO-ARM100",
+    "license": "See assets/so101/LICENSE.SO-ARM100",
+    "vendorMaintained": false,
+    "notes": "Committed phys-0 canonical visual asset used by the Electron calibration and live mesh viewers; kinematic URDF is the existing LeRobot/placo bridge model."
+  },
+  "quality": "phys0_verified",
+  "formats": ["urdf", "stl"],
+  "variants": {
+    "visual": {
+      "descriptionPath": "assets/so101/so101_new_calib.urdf",
+      "descriptionFormat": "urdf",
+      "meshRoots": ["assets/so101/assets"],
+      "defaultFrame": "base",
+      "baseLink": "base",
+      "endEffectorFrame": "gripper",
+      "defaultJointPositions": {
+        "shoulder_pan": 0,
+        "shoulder_lift": 0,
+        "elbow_flex": 0,
+        "wrist_flex": 0,
+        "wrist_roll": 0,
+        "gripper": 0
+      },
+      "defaultController": "lerobot",
+      "simBackends": ["mujoco", "gazebo"]
+    },
+    "kinematics": {
+      "descriptionPath": "assets/kinematics/so101_kinematics.urdf",
+      "descriptionFormat": "urdf",
+      "meshRoots": [],
+      "defaultFrame": "base",
+      "baseLink": "base",
+      "endEffectorFrame": "gripper",
+      "defaultController": "lerobot"
+    }
+  },
+  "protocols": ["lerobot", "serial", "none"],
+  "patches": [
+    {
+      "type": "package_path_fix",
+      "description": "Vendored mesh paths are repository-local so Electron and backend tools can load without ROS package resolution.",
+      "files": ["assets/so101/so101_new_calib.urdf", "assets/so101/assets"],
+      "author": "phys-0",
+      "date": "2026-05-21"
+    },
+    {
+      "type": "other",
+      "description": "Existing calibration workflow keeps deterministic endpoint prompts and separate physical calibration files per robot id.",
+      "files": ["scripts/calibrate_so101_deterministic.py", "assets/kinematics/so101_kinematics.urdf"],
+      "author": "chem-0"
+    }
+  ],
+  "validation": {
+    "status": "passing",
+    "tests": ["xml_parse", "mesh_resolve", "joint_limits", "fk", "bbox"],
+    "lastValidatedAt": "2026-05-21",
+    "failures": []
+  }
+}

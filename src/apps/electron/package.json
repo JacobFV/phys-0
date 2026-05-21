@@ -6,10 +6,10 @@
   "private": true,
   "main": "dist/main/main.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json && node scripts/copy-renderer.mjs",
+    "build": "npm --prefix ../../.. run backend:build && tsc -p tsconfig.json && node scripts/copy-renderer.mjs",
     "prepare-native-name": "node scripts/patch-electron-app-name.mjs",
-    "dev": "npm run build && npm run prepare-native-name && electron .",
-    "watch": "npm run build && npm run prepare-native-name && concurrently -k -n tsc,copy,app -c blue,magenta,green \"tsc -p tsconfig.json -w --preserveWatchOutput\" \"chokidar 'src/renderer/*.{html,css}' -c 'node scripts/copy-renderer.mjs'\" \"electronmon .\""
+    "dev": "npm run build && npm run prepare-native-name && ELECTRON_DISABLE_SANDBOX=1 electron --no-sandbox .",
+    "watch": "npm run build && npm run prepare-native-name && concurrently -k -n tsc,copy,app -c blue,magenta,green \"tsc -p tsconfig.json -w --preserveWatchOutput\" \"chokidar 'src/renderer/*.{html,css}' -c 'node scripts/copy-renderer.mjs'\" \"ELECTRON_DISABLE_SANDBOX=1 electronmon --no-sandbox .\""
   },
   "electronmon": {
     "patterns": [

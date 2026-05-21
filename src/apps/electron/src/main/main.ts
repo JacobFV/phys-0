@@ -247,7 +247,7 @@ app.whenReady().then(async () => {
     applicationVersion: app.getVersion(),
     copyright: "Local chem-0 research project"
   });
-  backend.on("stderr", (text) => console.error(`[chem-0 python] ${text}`));
+  backend.on("stderr", (text: string) => console.error(`[chem-0 python] ${text}`));
   backend.on("agent-event", sendAgentEvent);
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
     callback(permission === "media");

@@ -6,7 +6,7 @@ import OpenAI from "openai";
 import { AudioService } from "./audio";
 import { PythonBridge } from "./pythonBridge";
 import { Chem0Store, DEFAULT_PHYSICAL_WORLD_ID } from "./store";
-import type { Experiment, JsonObject, RobotKind, WorldType } from "./types";
+import type { AssetManifest, Experiment, JsonObject, JsonValue, PhysBackend, PhysEntityKind, PhysFieldKind, PhysProcessKind, Protocol, RobotKind, WorldType } from "./types";
 
 const DEFAULT_MODEL = "gpt-5.5";
 const MAX_AGENT_STEPS = 8;
@@ -47,6 +47,7 @@ export class Chem0Backend extends EventEmitter {
   async init(): Promise<void> {
     if (this.initialized) return;
     await this.store.init();
+    this.loadAssetRegistry();
     this.bridge.start();
     this.initialized = true;
   }
@@ -76,7 +77,8 @@ export class Chem0Backend extends EventEmitter {
       return {
         worlds: this.store.listWorlds() as unknown as JsonObject[],
         assignments: this.store.listRobotWorldAssignments() as unknown as JsonObject[],
-        virtual_entities: this.store.listVirtualEntities() as unknown as JsonObject[]
+        virtual_entities: this.store.listVirtualEntities() as unknown as JsonObject[],
+        phys_entities: this.store.listWorldEntities() as unknown as JsonObject[]
       };
     }
     if (name === "create_world") {
@@ -147,7 +149,16 @@ export class Chem0Backend extends EventEmitter {
         metadata: { entity_id: entity.id, model: entity.spec.model ?? "so101", collision_mode: "full" },
         makeDefault: args.make_default === true
       });
-      return { entity: entity as unknown as JsonObject, assignment: assignment as unknown as JsonObject };
+      const physEntity = this.store.spawnEntity({
+        worldId: entity.world_id,
+        kind: "robot",
+        assetId: this.store.getAssetManifest("so_arm/so101") ? "so_arm/so101" : null,
+        regimes: ["articulated_body", "rigid_body"],
+        pose: entity.pose,
+        state: { virtual_entity_id: entity.id, controller_status: "virtual" },
+        metadata: { name: entity.name, legacy_virtual_entity: true, ...entity.spec }
+      });
+      return { entity: entity as unknown as JsonObject, phys_entity: physEntity as unknown as JsonObject, assignment: assignment as unknown as JsonObject };
     }
     if (name === "create_virtual_camera") {
       return {
@@ -220,6 +231,157 @@ export class Chem0Backend extends EventEmitter {
     }
     if (name === "list_agent_session_events") {
       return { events: this.store.listEvents(String(args.experiment_id)) as unknown as JsonObject[] };
+    }
+    if (name === "list_asset_catalog") {
+      return { assets: this.store.listAssetCatalog() as unknown as JsonObject[] };
+    }
+    if (name === "get_asset_manifest") {
+      const assetId = String(args.asset_id ?? "").trim();
+      if (!assetId) throw new Error("get_asset_manifest requires asset_id.");
+      const asset = this.store.getAssetManifest(assetId);
+      if (!asset) throw new Error(`Unknown asset_id: ${assetId}`);
+      return { asset: asset as unknown as JsonObject };
+    }
+    if (name === "validate_asset") {
+      const assetId = String(args.asset_id ?? "").trim();
+      if (!assetId) throw new Error("validate_asset requires asset_id.");
+      return { validation: this.validateAsset(assetId) };
+    }
+    if (name === "spawn_entity") {
+      return {
+        entity: this.store.spawnEntity({
+          worldId: String(args.world_id ?? ""),
+          kind: String(args.kind ?? "custom") as PhysEntityKind,
+          assetId: typeof args.asset_id === "string" && args.asset_id.trim() ? args.asset_id : null,
+          regimes: Array.isArray(args.regimes) ? args.regimes.map(String) : [],
+          state: (args.state as JsonObject) ?? {},
+          pose: (args.pose as JsonObject) ?? null,
+          metadata: (args.metadata as JsonObject) ?? {}
+        }) as unknown as JsonObject
+      };
+    }
+    if (name === "spawn_robot") {
+      return {
+        entity: this.store.spawnEntity({
+          worldId: String(args.world_id ?? ""),
+          kind: "robot",
+          assetId: String(args.asset_id ?? ""),
+          regimes: ["articulated_body", "rigid_body"],
+          pose: (args.pose as JsonObject) ?? null,
+          state: {
+            backend: typeof args.backend === "string" ? args.backend : null,
+            controller: typeof args.controller === "string" ? args.controller : null,
+            variant: typeof args.variant === "string" ? args.variant : "default"
+          },
+          metadata: (args.metadata as JsonObject) ?? {}
+        }) as unknown as JsonObject
+      };
+    }
+    if (name === "spawn_object") {
+      return {
+        entity: this.store.spawnEntity({
+          worldId: String(args.world_id ?? ""),
+          kind: "object",
+          assetId: String(args.asset_id ?? ""),
+          regimes: ["rigid_body"],
+          pose: (args.pose as JsonObject) ?? null,
+          state: { static: args.static === true, variant: typeof args.variant === "string" ? args.variant : "default" },
+          metadata: (args.metadata as JsonObject) ?? {}
+        }) as unknown as JsonObject
+      };
+    }
+    if (name === "add_field") {
+      return {
+        field: this.store.addField({
+          worldId: String(args.world_id ?? ""),
+          kind: String(args.kind ?? "custom") as PhysFieldKind,
+          domain: (args.domain as JsonObject) ?? { type: "symbolic" },
+          units: typeof args.units === "string" ? args.units : null,
+          stateRef: typeof args.state_ref === "string" ? args.state_ref : null,
+          metadata: (args.metadata as JsonObject) ?? {}
+        }) as unknown as JsonObject
+      };
+    }
+    if (name === "add_process") {
+      return {
+        process: this.store.addProcess({
+          worldId: String(args.world_id ?? ""),
+          kind: String(args.kind ?? "custom") as PhysProcessKind,
+          inputs: Array.isArray(args.inputs) ? args.inputs.map(String) : [],
+          outputs: Array.isArray(args.outputs) ? args.outputs.map(String) : [],
+          backend: typeof args.backend === "string" ? args.backend as PhysBackend : null,
+          parameters: (args.parameters as JsonObject) ?? {}
+        }) as unknown as JsonObject
+      };
+    }
+    if (name === "record_observation") {
+      return {
+        observation: this.store.recordObservation({
+          worldId: String(args.world_id ?? ""),
+          sourceId: String(args.source_id ?? ""),
+          targetIds: Array.isArray(args.target_ids) ? args.target_ids.map(String) : null,
+          kind: String(args.kind ?? "custom") as never,
+          timestamp: typeof args.timestamp === "string" ? args.timestamp : undefined,
+          dataRef: typeof args.data_ref === "string" ? args.data_ref : null,
+          value: (args.value ?? null) as JsonValue,
+          uncertainty: (args.uncertainty ?? null) as JsonValue,
+          metadata: (args.metadata as JsonObject) ?? {}
+        }) as unknown as JsonObject
+      };
+    }
+    if (name === "record_intervention") {
+      return {
+        intervention: this.store.recordIntervention({
+          worldId: String(args.world_id ?? ""),
+          actorId: typeof args.actor_id === "string" ? args.actor_id : null,
+          targetIds: Array.isArray(args.target_ids) ? args.target_ids.map(String) : [],
+          kind: String(args.kind ?? "custom") as never,
+          timestamp: typeof args.timestamp === "string" ? args.timestamp : undefined,
+          payload: (args.payload ?? {}) as JsonValue,
+          expectedEffects: Array.isArray(args.expected_effects) ? args.expected_effects.map(String) : null,
+          metadata: (args.metadata as JsonObject) ?? {}
+        }) as unknown as JsonObject
+      };
+    }
+    if (name === "query_history") {
+      return this.store.queryHistory(String(args.world_id ?? ""), Number(args.limit ?? 100)) as unknown as JsonObject;
+    }
+    if (name === "export_world") {
+      return { world: this.exportWorld(String(args.world_id ?? "")) };
+    }
+    if (name === "list_protocol_adapters") {
+      return { adapters: this.protocolAdapters() as unknown as JsonObject[] };
+    }
+    if (name === "connect_controller") {
+      return {
+        controller: this.store.connectController({
+          entityId: String(args.entity_id ?? ""),
+          protocol: String(args.protocol ?? "none") as Protocol,
+          endpoint: typeof args.endpoint === "string" ? args.endpoint : null,
+          config: (args.config as JsonObject) ?? {}
+        }) as unknown as JsonObject
+      };
+    }
+    if (name === "read_state") {
+      const entityId = String(args.entity_id ?? "");
+      const entity = this.store.listWorldEntities().find((candidate) => candidate.id === entityId);
+      if (!entity) throw new Error(`Unknown entity_id: ${entityId}`);
+      return { entity_id: entity.id, state: entity.state, controllers: this.store.listEntityControllers(entity.id) as unknown as JsonObject[] };
+    }
+    if (name === "send_command") {
+      const entityId = String(args.entity_id ?? "");
+      const command = (args.command ?? {}) as JsonValue;
+      const entity = this.store.listWorldEntities().find((candidate) => candidate.id === entityId);
+      if (!entity) throw new Error(`Unknown entity_id: ${entityId}`);
+      const intervention = this.store.recordIntervention({
+        worldId: entity.world_id,
+        actorId: typeof args.actor_id === "string" ? args.actor_id : null,
+        targetIds: [entity.id],
+        kind: "robot_command",
+        payload: command,
+        metadata: { via: "send_command", dry_run: true }
+      });
+      return { ok: true, dry_run: true, intervention: intervention as unknown as JsonObject };
     }
     if (name === "list_experiment_artifacts") {
       return { artifacts: this.store.listArtifacts(String(args.experiment_id)) };
@@ -558,6 +720,85 @@ export class Chem0Backend extends EventEmitter {
     return null;
   }
 
+  private loadAssetRegistry(): void {
+    const registryDir = path.join(this.repoRoot, "assets", "registry");
+    if (!fs.existsSync(registryDir)) return;
+    const stack = [registryDir];
+    while (stack.length > 0) {
+      const dir = stack.pop();
+      if (!dir) continue;
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const absolute = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          stack.push(absolute);
+          continue;
+        }
+        if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+        const manifest = JSON.parse(fs.readFileSync(absolute, "utf8")) as AssetManifest;
+        if (manifest && typeof manifest.id === "string") this.store.upsertAssetManifest(manifest);
+      }
+    }
+  }
+
+  private validateAsset(assetId: string): JsonObject {
+    const asset = this.store.getAssetManifest(assetId);
+    if (!asset) throw new Error(`Unknown asset_id: ${assetId}`);
+    const failures: string[] = [];
+    for (const variant of Object.values(asset.manifest.variants)) {
+      const descriptionPath = typeof variant.descriptionPath === "string" ? variant.descriptionPath : "";
+      if (!descriptionPath) failures.push("variant missing descriptionPath");
+      if (descriptionPath && !fs.existsSync(path.join(this.repoRoot, descriptionPath))) failures.push(`missing description: ${descriptionPath}`);
+      const meshRoots = Array.isArray(variant.meshRoots) ? variant.meshRoots.map(String) : [];
+      for (const root of meshRoots) {
+        if (!fs.existsSync(path.join(this.repoRoot, root))) failures.push(`missing mesh root: ${root}`);
+      }
+    }
+    return {
+      asset_id: assetId,
+      status: failures.length === 0 ? asset.manifest.validation.status : "failing",
+      deterministic_checks: ["manifest_parse", "description_path_exists", "mesh_roots_exist"],
+      failures
+    };
+  }
+
+  private exportWorld(worldId: string): JsonObject {
+    const world = this.store.getWorld(worldId);
+    if (!world) throw new Error(`Unknown world_id: ${worldId}`);
+    const entities = this.store.listWorldEntities(worldId);
+    const fields = this.store.listWorldFields(worldId);
+    const processes = this.store.listWorldProcesses(worldId);
+    const regimes = Array.from(new Set(entities.flatMap((entity) => entity.regimes)));
+    return {
+      id: world.id,
+      name: world.name,
+      kind: world.type === "virtual" ? "simulated" : "physical",
+      regimes,
+      frameConvention: typeof world.metadata.frameConvention === "string" ? world.metadata.frameConvention : "ros_enu",
+      entities: entities as unknown as JsonObject[],
+      fields: fields as unknown as JsonObject[],
+      processes: processes as unknown as JsonObject[],
+      constraints: [],
+      sensors: [],
+      actuators: [],
+      metadata: world.metadata
+    };
+  }
+
+  private protocolAdapters(): JsonObject[] {
+    return [
+      { id: "lerobot", status: "implemented", commands: ["joint_position", "cartesian_pose", "gripper"], runtime: "python_bridge" },
+      { id: "ros2", status: "stub", commands: ["raw"], runtime: "external" },
+      { id: "ros2_control", status: "stub", commands: ["joint_position", "joint_velocity"], runtime: "external" },
+      { id: "mavlink", status: "stub", commands: ["mavlink_takeoff", "mavlink_land", "mavlink_goto"], runtime: "external" },
+      { id: "gazebo", status: "stub", commands: ["spawn", "step", "reset"], runtime: "external" },
+      { id: "mujoco", status: "stub", commands: ["spawn", "step", "reset"], runtime: "external" },
+      { id: "isaac", status: "planned", commands: [], runtime: "external" },
+      { id: "sapien", status: "planned", commands: [], runtime: "external" },
+      { id: "taichi", status: "planned", commands: [], runtime: "external" },
+      { id: "openfoam", status: "planned", commands: [], runtime: "external" }
+    ];
+  }
+
   private backendTools(): JsonObject[] {
     return [
       {
@@ -752,6 +993,221 @@ export class Chem0Backend extends EventEmitter {
         name: "list_experiments",
         description: "List tracked experiments from the local SQLite store.",
         inputSchema: { type: "object", properties: {}, additionalProperties: false }
+      },
+      {
+        name: "list_asset_catalog",
+        description: "List committed phys-0 asset manifests with quality, provenance, variants, protocols, and validation status.",
+        inputSchema: { type: "object", properties: {}, additionalProperties: false }
+      },
+      {
+        name: "get_asset_manifest",
+        description: "Return a single phys-0 asset manifest.",
+        inputSchema: {
+          type: "object",
+          properties: { asset_id: { type: "string" } },
+          required: ["asset_id"],
+          additionalProperties: false
+        }
+      },
+      {
+        name: "validate_asset",
+        description: "Run deterministic local manifest/path validation for a committed asset. This is the phase-2 validator, not full sim spawn certification.",
+        inputSchema: {
+          type: "object",
+          properties: { asset_id: { type: "string" } },
+          required: ["asset_id"],
+          additionalProperties: false
+        }
+      },
+      {
+        name: "spawn_robot",
+        description: "Spawn a robot asset as a generic phys-0 world entity. Controller connectivity is tracked separately.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            world_id: { type: "string" },
+            asset_id: { type: "string" },
+            variant: { type: "string" },
+            pose: { type: "object", additionalProperties: true },
+            backend: { type: "string" },
+            controller: { type: "string" },
+            metadata: { type: "object", additionalProperties: true }
+          },
+          required: ["world_id", "asset_id"],
+          additionalProperties: false
+        }
+      },
+      {
+        name: "spawn_object",
+        description: "Spawn an object asset as a phys-0 world entity.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            world_id: { type: "string" },
+            asset_id: { type: "string" },
+            variant: { type: "string" },
+            pose: { type: "object", additionalProperties: true },
+            static: { type: "boolean" },
+            metadata: { type: "object", additionalProperties: true }
+          },
+          required: ["world_id", "asset_id"],
+          additionalProperties: false
+        }
+      },
+      {
+        name: "spawn_entity",
+        description: "Spawn any phys-0 entity kind for process-world modeling.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            world_id: { type: "string" },
+            kind: { type: "string" },
+            asset_id: { type: ["string", "null"] },
+            regimes: { type: "array", items: { type: "string" } },
+            state: { type: "object", additionalProperties: true },
+            pose: { type: "object", additionalProperties: true },
+            metadata: { type: "object", additionalProperties: true }
+          },
+          required: ["world_id", "kind"],
+          additionalProperties: false
+        }
+      },
+      {
+        name: "add_field",
+        description: "Add a first-class physical field such as temperature, concentration, belief, risk, light, or electric potential.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            world_id: { type: "string" },
+            kind: { type: "string" },
+            domain: { type: "object", additionalProperties: true },
+            units: { type: "string" },
+            state_ref: { type: "string" },
+            metadata: { type: "object", additionalProperties: true }
+          },
+          required: ["world_id", "kind", "domain"],
+          additionalProperties: false
+        }
+      },
+      {
+        name: "add_process",
+        description: "Add a world process graph node such as chemical reaction, controller, diffusion, thermal transfer, or rigid dynamics.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            world_id: { type: "string" },
+            kind: { type: "string" },
+            inputs: { type: "array", items: { type: "string" } },
+            outputs: { type: "array", items: { type: "string" } },
+            backend: { type: "string" },
+            parameters: { type: "object", additionalProperties: true }
+          },
+          required: ["world_id", "kind", "inputs", "outputs"],
+          additionalProperties: false
+        }
+      },
+      {
+        name: "record_observation",
+        description: "Record a first-class observation such as image, pose, pH/chemical measurement, electrical signal, audio, or human annotation.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            world_id: { type: "string" },
+            source_id: { type: "string" },
+            target_ids: { type: "array", items: { type: "string" } },
+            kind: { type: "string" },
+            timestamp: { type: "string" },
+            data_ref: { type: "string" },
+            value: {},
+            uncertainty: {},
+            metadata: { type: "object", additionalProperties: true }
+          },
+          required: ["world_id", "source_id", "kind"],
+          additionalProperties: false
+        }
+      },
+      {
+        name: "record_intervention",
+        description: "Record a first-class intervention such as robot command, material addition, mixing, heating, measurement, or environment change.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            world_id: { type: "string" },
+            actor_id: { type: "string" },
+            target_ids: { type: "array", items: { type: "string" } },
+            kind: { type: "string" },
+            timestamp: { type: "string" },
+            payload: {},
+            expected_effects: { type: "array", items: { type: "string" } },
+            metadata: { type: "object", additionalProperties: true }
+          },
+          required: ["world_id", "target_ids", "kind", "payload"],
+          additionalProperties: false
+        }
+      },
+      {
+        name: "query_history",
+        description: "Return observation and intervention history for a world.",
+        inputSchema: {
+          type: "object",
+          properties: { world_id: { type: "string" }, limit: { type: "number", default: 100 } },
+          required: ["world_id"],
+          additionalProperties: false
+        }
+      },
+      {
+        name: "export_world",
+        description: "Export a canonical phys-0 world document with entities, fields, processes, and metadata.",
+        inputSchema: {
+          type: "object",
+          properties: { world_id: { type: "string" } },
+          required: ["world_id"],
+          additionalProperties: false
+        }
+      },
+      {
+        name: "list_protocol_adapters",
+        description: "List implemented, stubbed, and planned protocol/runtime adapters.",
+        inputSchema: { type: "object", properties: {}, additionalProperties: false }
+      },
+      {
+        name: "connect_controller",
+        description: "Attach a protocol/controller configuration to an entity without assuming it is currently connected.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            entity_id: { type: "string" },
+            protocol: { type: "string" },
+            endpoint: { type: "string" },
+            config: { type: "object", additionalProperties: true }
+          },
+          required: ["entity_id", "protocol"],
+          additionalProperties: false
+        }
+      },
+      {
+        name: "read_state",
+        description: "Read the stored phys-0 entity state and associated controller records.",
+        inputSchema: {
+          type: "object",
+          properties: { entity_id: { type: "string" } },
+          required: ["entity_id"],
+          additionalProperties: false
+        }
+      },
+      {
+        name: "send_command",
+        description: "Record a robot/controller command as an intervention. Current generic adapter path is dry-run unless bridged by an embodiment-specific tool.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            entity_id: { type: "string" },
+            actor_id: { type: "string" },
+            command: {}
+          },
+          required: ["entity_id", "command"],
+          additionalProperties: false
+        }
       },
       {
         name: "list_agent_session_events",
