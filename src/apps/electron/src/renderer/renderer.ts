@@ -77,7 +77,13 @@ const chatLog = document.querySelector<HTMLDivElement>("#chat-log")!;
 const chatInput = document.querySelector<HTMLTextAreaElement>("#chat-input")!;
 const sendMessage = document.querySelector<HTMLButtonElement>("#send-message")!;
 const recordAudio = document.querySelector<HTMLButtonElement>("#record-audio")!;
-const phCanvas = document.querySelector<HTMLCanvasElement>("#ph-canvas");
+const metricGrid = document.querySelector<HTMLDivElement>("#metric-grid")!;
+const metricsCatalog = document.querySelector<HTMLUListElement>("#metrics-catalog")!;
+const metricLogsList = document.querySelector<HTMLUListElement>("#metric-logs")!;
+const metricsGridHint = document.querySelector<HTMLSpanElement>("#metrics-grid-hint")!;
+const metricsPaneHint = document.querySelector<HTMLSpanElement>("#metrics-pane-hint")!;
+const statusText = document.querySelector<HTMLSpanElement>("#status-text")!;
+const statusRecDot = document.querySelector<HTMLSpanElement>("#status-rec-dot")!;
 const camerasStrip = document.querySelector<HTMLDivElement>(".cameras-strip")!;
 const workspace = document.querySelector<HTMLDivElement>(".workspace")!;
 const lhsSidebar = document.querySelector<HTMLElement>("#sidebar-lhs")!;
@@ -114,8 +120,6 @@ let worldModalType: "physical" | "virtual" = "physical";
 let worldModalWorldId = "";
 let confirmResolver: ((confirmed: boolean) => void) | null = null;
 
-type PhSample = { value: number; timestamp: number };
-const phSamples: PhSample[] = [];
 
 function closeConfirmModal(confirmed: boolean): void {
   confirmModal.hidden = true;
@@ -186,6 +190,7 @@ function setActive(experiment: JsonObject, session?: JsonObject): void {
   updateExperimentsListSelection();
   renderPickerMenus();
   updateNotesPane();
+  updateStatusbar();
 }
 
 function appendChat(role: string, text: string): HTMLDivElement {
@@ -227,90 +232,442 @@ function appendToolBubble(name: string, result: JsonObject | undefined): void {
   }
 }
 
-function drawPhChart(): void {
-  if (!phCanvas) return;
-  const dpr = window.devicePixelRatio || 1;
-  const rect = phCanvas.getBoundingClientRect();
-  if (rect.width === 0 || rect.height === 0) return;
-  phCanvas.width = Math.floor(rect.width * dpr);
-  phCanvas.height = Math.floor(rect.height * dpr);
-  const ctx = phCanvas.getContext("2d");
-  if (!ctx) return;
-  ctx.scale(dpr, dpr);
+/* ------------------------------ metrics ------------------------------ */
+// An experiment produces low-level sensor streams (continuous, plottable) and
+// high-level metric logs (discrete events). Streams live in `metrics` and are
+// charted; logs live in `metricLogs`. The main area shows a grid of pinned
+// stream charts; the right-hand Metrics pane is the catalog that pins them.
 
-  const w = rect.width;
-  const h = rect.height;
+type MetricSample = { value: number; timestamp: number };
+type MetricLogEntry = { name: string; message: string; level: string; timestamp: number };
+type MetricDef = { unit?: string; min?: number | null; max?: number | null };
+
+type StreamMetric = {
+  name: string;
+  unit: string;
+  min: number | null;
+  max: number | null;
+  samples: MetricSample[];
+};
+
+const MAX_METRIC_SAMPLES = 600;
+const MAX_METRIC_LOGS = 200;
+const metrics = new Map<string, StreamMetric>();
+const metricLogs: MetricLogEntry[] = [];
+
+let pinnedMetrics: Set<string>;
+try {
+  const stored = localStorage.getItem("chem0:pinned-metrics");
+  const parsed = stored ? (JSON.parse(stored) as unknown) : null;
+  pinnedMetrics = new Set(Array.isArray(parsed) ? parsed.map(String) : ["pH"]);
+} catch {
+  pinnedMetrics = new Set(["pH"]);
+}
+
+function savePinnedMetrics(): void {
+  try {
+    localStorage.setItem("chem0:pinned-metrics", JSON.stringify([...pinnedMetrics]));
+  } catch { /* ignore */ }
+}
+
+function registerMetric(name: string, def: MetricDef = {}): StreamMetric {
+  let metric = metrics.get(name);
+  if (!metric) {
+    metric = { name, unit: def.unit ?? "", min: def.min ?? null, max: def.max ?? null, samples: [] };
+    metrics.set(name, metric);
+  } else {
+    if (def.unit) metric.unit = def.unit;
+    if (def.min !== undefined) metric.min = def.min;
+    if (def.max !== undefined) metric.max = def.max;
+  }
+  return metric;
+}
+
+// Returns true when a brand-new metric name was introduced (a structural change
+// that needs the grid/catalog rebuilt rather than just redrawn).
+function ingestSample(name: string, value: number, timestamp: number, def: MetricDef = {}): boolean {
+  if (!Number.isFinite(value) || !Number.isFinite(timestamp)) return false;
+  const isNew = !metrics.has(name);
+  const metric = registerMetric(name, def);
+  metric.samples.push({ value, timestamp });
+  if (metric.samples.length > MAX_METRIC_SAMPLES) {
+    metric.samples.splice(0, metric.samples.length - MAX_METRIC_SAMPLES);
+  }
+  return isNew;
+}
+
+function ingestLog(entry: MetricLogEntry): void {
+  metricLogs.push(entry);
+  if (metricLogs.length > MAX_METRIC_LOGS) {
+    metricLogs.splice(0, metricLogs.length - MAX_METRIC_LOGS);
+  }
+}
+
+// Generic event shapes from the backend / agent stream. `ph_sample` is the one
+// live source today; `metric_sample` / `metric_log` are handled so any future
+// backend metric flows straight through without renderer changes.
+function ingestMetricSampleEvent(content: JsonObject): boolean {
+  const name = String(content.name ?? "").trim();
+  if (!name) return false;
+  const def: MetricDef = {};
+  if (typeof content.unit === "string") def.unit = content.unit;
+  if (typeof content.min === "number") def.min = content.min;
+  if (typeof content.max === "number") def.max = content.max;
+  return ingestSample(name, Number(content.value), Number(content.timestamp ?? Date.now()), def);
+}
+
+function ingestMetricLogEvent(content: JsonObject): void {
+  const message = String(content.message ?? content.text ?? "").trim();
+  if (!message) return;
+  ingestLog({
+    name: String(content.name ?? content.metric ?? "log"),
+    message,
+    level: String(content.level ?? "info"),
+    timestamp: Number(content.timestamp) || Date.now()
+  });
+}
+
+// Clears samples/logs on an experiment switch but keeps metric definitions, so
+// pH stays registered (its catalog row and 0–14 axis survive a reload).
+function resetMetricData(): void {
+  for (const metric of metrics.values()) metric.samples.length = 0;
+  metricLogs.length = 0;
+}
+
+function themeColor(name: string, fallback: string): string {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value || fallback;
+}
+
+function formatMetricValue(value: number): string {
+  const abs = Math.abs(value);
+  if (abs >= 1000) return value.toFixed(0);
+  if (abs >= 100) return value.toFixed(1);
+  return value.toFixed(2);
+}
+
+function latestSample(metric: StreamMetric): MetricSample | null {
+  return metric.samples.length ? metric.samples[metric.samples.length - 1] : null;
+}
+
+function latestMetricText(metric: StreamMetric): string {
+  const sample = latestSample(metric);
+  if (!sample) return "—";
+  const value = formatMetricValue(sample.value);
+  return metric.unit ? `${value} ${metric.unit}` : value;
+}
+
+function metricBounds(metric: StreamMetric): { lo: number; hi: number } {
+  if (metric.min !== null && metric.max !== null) return { lo: metric.min, hi: metric.max };
+  if (metric.samples.length === 0) return { lo: metric.min ?? 0, hi: metric.max ?? 1 };
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const sample of metric.samples) {
+    if (sample.value < lo) lo = sample.value;
+    if (sample.value > hi) hi = sample.value;
+  }
+  if (lo === hi) { lo -= 1; hi += 1; }
+  const pad = (hi - lo) * 0.12;
+  return { lo: metric.min ?? lo - pad, hi: metric.max ?? hi + pad };
+}
+
+function prepareCanvas(canvas: HTMLCanvasElement): { ctx: CanvasRenderingContext2D; w: number; h: number } | null {
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return null;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.floor(rect.width * dpr);
+  canvas.height = Math.floor(rect.height * dpr);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.scale(dpr, dpr);
+  return { ctx, w: rect.width, h: rect.height };
+}
+
+function drawMetricChart(canvas: HTMLCanvasElement, metric: StreamMetric): void {
+  const prepared = prepareCanvas(canvas);
+  if (!prepared) return;
+  const { ctx, w, h } = prepared;
   ctx.clearRect(0, 0, w, h);
 
-  const padLeft = 32;
-  const padBottom = 18;
+  const padLeft = 40;
+  const padBottom = 16;
   const padTop = 10;
   const padRight = 12;
   const innerW = Math.max(1, w - padLeft - padRight);
   const innerH = Math.max(1, h - padTop - padBottom);
 
-  ctx.font = "11px Inter, sans-serif";
+  const gridColor = themeColor("--border-1", "#e4e4e7");
+  const axisColor = themeColor("--border-2", "#d4d4d8");
+  const labelColor = themeColor("--text-4", "#a1a1aa");
+  const lineColor = themeColor("--accent", "#c08a0b");
+
+  const { lo, hi } = metricBounds(metric);
+  const span = Math.max(1e-9, hi - lo);
+
+  ctx.font = "10px ui-monospace, monospace";
   ctx.textBaseline = "middle";
   ctx.textAlign = "right";
 
-  for (const ph of [0, 7, 14]) {
-    const y = padTop + innerH - (ph / 14) * innerH;
-    ctx.strokeStyle = "#1c2029";
+  for (const frac of [0, 0.5, 1]) {
+    const y = padTop + innerH - frac * innerH;
+    ctx.strokeStyle = gridColor;
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(padLeft, y);
     ctx.lineTo(padLeft + innerW, y);
     ctx.stroke();
-    ctx.fillStyle = "#7a8290";
-    ctx.fillText(String(ph), padLeft - 6, y);
+    ctx.fillStyle = labelColor;
+    ctx.fillText(formatMetricValue(lo + frac * span), padLeft - 6, y);
   }
 
-  ctx.strokeStyle = "#262c37";
+  ctx.strokeStyle = axisColor;
+  ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(padLeft, padTop);
   ctx.lineTo(padLeft, padTop + innerH);
   ctx.lineTo(padLeft + innerW, padTop + innerH);
   ctx.stroke();
 
-  if (phSamples.length === 0) {
-    ctx.fillStyle = "#444";
+  if (metric.samples.length === 0) {
+    ctx.fillStyle = labelColor;
     ctx.textAlign = "center";
-    ctx.fillText("waiting for record_ph samples…", padLeft + innerW / 2, padTop + innerH / 2);
+    ctx.fillText("waiting for samples…", padLeft + innerW / 2, padTop + innerH / 2);
     return;
   }
 
-  const tMin = phSamples[0].timestamp;
-  const tMax = phSamples[phSamples.length - 1].timestamp;
+  const tMin = metric.samples[0].timestamp;
+  const tMax = metric.samples[metric.samples.length - 1].timestamp;
   const tSpan = Math.max(1, tMax - tMin);
+  const xFor = (t: number): number =>
+    metric.samples.length === 1 ? padLeft + innerW / 2 : padLeft + ((t - tMin) / tSpan) * innerW;
+  const yFor = (v: number): number =>
+    padTop + innerH - Math.max(0, Math.min(1, (v - lo) / span)) * innerH;
 
-  const xFor = (t: number) =>
-    phSamples.length === 1 ? padLeft + innerW / 2 : padLeft + ((t - tMin) / tSpan) * innerW;
-  const yFor = (v: number) => padTop + innerH - (Math.max(0, Math.min(14, v)) / 14) * innerH;
-
-  ctx.strokeStyle = "#6ee7c8";
+  ctx.strokeStyle = lineColor;
   ctx.lineWidth = 1.5;
   ctx.beginPath();
-  phSamples.forEach((sample, i) => {
+  metric.samples.forEach((sample, index) => {
     const x = xFor(sample.timestamp);
     const y = yFor(sample.value);
-    if (i === 0) ctx.moveTo(x, y);
+    if (index === 0) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   });
   ctx.stroke();
 
-  ctx.fillStyle = "#6ee7c8";
-  for (const sample of phSamples) {
-    const x = xFor(sample.timestamp);
-    const y = yFor(sample.value);
-    ctx.beginPath();
-    ctx.arc(x, y, 2.5, 0, Math.PI * 2);
-    ctx.fill();
+  if (metric.samples.length <= 80) {
+    ctx.fillStyle = lineColor;
+    for (const sample of metric.samples) {
+      ctx.beginPath();
+      ctx.arc(xFor(sample.timestamp), yFor(sample.value), 2.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
+}
+
+function drawSparkline(canvas: HTMLCanvasElement, metric: StreamMetric): void {
+  const prepared = prepareCanvas(canvas);
+  if (!prepared) return;
+  const { ctx, w, h } = prepared;
+  ctx.clearRect(0, 0, w, h);
+  if (metric.samples.length === 0) return;
+  const { lo, hi } = metricBounds(metric);
+  const span = Math.max(1e-9, hi - lo);
+  const tMin = metric.samples[0].timestamp;
+  const tSpan = Math.max(1, metric.samples[metric.samples.length - 1].timestamp - tMin);
+  const pad = 2;
+  ctx.strokeStyle = themeColor("--accent", "#c08a0b");
+  ctx.lineWidth = 1.25;
+  ctx.beginPath();
+  metric.samples.forEach((sample, index) => {
+    const x = metric.samples.length === 1
+      ? w / 2
+      : pad + ((sample.timestamp - tMin) / tSpan) * (w - 2 * pad);
+    const y = pad + (h - 2 * pad) - Math.max(0, Math.min(1, (sample.value - lo) / span)) * (h - 2 * pad);
+    if (index === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+}
+
+const METRIC_PIN_SVG =
+  '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">' +
+  '<path d="M6 2.2h4l-.7 1.3.8 3.2 1.9 1.8v1.1H4V8.5l1.9-1.8.8-3.2z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>' +
+  '<line x1="8" y1="10.4" x2="8" y2="13.8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>';
+
+function renderMetricGrid(): void {
+  metricGrid.replaceChildren();
+  const pinned = [...pinnedMetrics].filter((name) => metrics.has(name));
+  metricsGridHint.textContent = pinned.length ? `${pinned.length} pinned` : "graph grid";
+  if (pinned.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "metric-grid-empty";
+    empty.textContent = "No metrics pinned. Pin a metric in the Metrics panel to chart it here.";
+    metricGrid.append(empty);
+    return;
+  }
+  for (const name of pinned) {
+    const card = document.createElement("div");
+    card.className = "metric-card";
+    card.dataset.metric = name;
+    const head = document.createElement("div");
+    head.className = "metric-card-head";
+    const nameEl = document.createElement("span");
+    nameEl.className = "metric-card-name";
+    nameEl.textContent = name;
+    const valueEl = document.createElement("span");
+    valueEl.className = "metric-card-value";
+    const unpin = document.createElement("button");
+    unpin.className = "metric-unpin";
+    unpin.title = "Unpin from graph grid";
+    unpin.setAttribute("aria-label", `Unpin ${name}`);
+    unpin.innerHTML = iconSvg("x");
+    unpin.addEventListener("click", () => toggleMetricPin(name));
+    head.append(nameEl, valueEl, unpin);
+    const graph = document.createElement("div");
+    graph.className = "metric-card-graph";
+    graph.append(document.createElement("canvas"));
+    card.append(head, graph);
+    metricGrid.append(card);
+  }
+}
+
+function redrawMetricGrid(): void {
+  for (const card of metricGrid.querySelectorAll<HTMLElement>(".metric-card")) {
+    const metric = metrics.get(card.dataset.metric ?? "");
+    if (!metric) continue;
+    const canvas = card.querySelector("canvas");
+    if (canvas) drawMetricChart(canvas, metric);
+    const valueEl = card.querySelector<HTMLElement>(".metric-card-value");
+    if (valueEl) valueEl.textContent = latestMetricText(metric);
+  }
+}
+
+function renderMetricCatalog(): void {
+  metricsCatalog.replaceChildren();
+  const names = [...metrics.keys()].sort((a, b) => a.localeCompare(b));
+  metricsPaneHint.textContent = names.length ? `${names.length} tracked` : "";
+  if (names.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "list-empty";
+    empty.textContent = "No metrics yet. They appear here as the experiment logs sensor and metric data.";
+    metricsCatalog.append(empty);
+    return;
+  }
+  for (const name of names) {
+    const metric = metrics.get(name)!;
+    const pinned = pinnedMetrics.has(name);
+    const li = document.createElement("li");
+    li.className = "metric-row";
+    li.dataset.metric = name;
+    const pin = document.createElement("button");
+    pin.className = "metric-pin";
+    pin.classList.toggle("pinned", pinned);
+    pin.setAttribute("aria-pressed", String(pinned));
+    pin.title = pinned ? "Unpin from graph grid" : "Pin to graph grid";
+    pin.innerHTML = METRIC_PIN_SVG;
+    pin.addEventListener("click", () => toggleMetricPin(name));
+    const main = document.createElement("div");
+    main.className = "metric-row-main";
+    const nameEl = document.createElement("div");
+    nameEl.className = "metric-row-name";
+    nameEl.textContent = metric.unit ? `${name} (${metric.unit})` : name;
+    const spark = document.createElement("canvas");
+    spark.className = "metric-spark";
+    main.append(nameEl, spark);
+    const valueEl = document.createElement("div");
+    valueEl.className = "metric-row-value";
+    li.append(pin, main, valueEl);
+    metricsCatalog.append(li);
+  }
+}
+
+function redrawMetricCatalog(): void {
+  for (const row of metricsCatalog.querySelectorAll<HTMLElement>(".metric-row")) {
+    const metric = metrics.get(row.dataset.metric ?? "");
+    if (!metric) continue;
+    const spark = row.querySelector<HTMLCanvasElement>("canvas.metric-spark");
+    if (spark) drawSparkline(spark, metric);
+    const valueEl = row.querySelector<HTMLElement>(".metric-row-value");
+    if (valueEl) valueEl.textContent = latestMetricText(metric);
+  }
+}
+
+function renderMetricLogs(): void {
+  metricLogsList.replaceChildren();
+  if (metricLogs.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "list-empty";
+    empty.textContent = "No metric log entries yet.";
+    metricLogsList.append(empty);
+    return;
+  }
+  for (let i = metricLogs.length - 1; i >= 0; i--) {
+    const entry = metricLogs[i];
+    const li = document.createElement("li");
+    li.className = "metric-log-row";
+    const level = entry.level.toLowerCase();
+    if (level === "error" || level === "warn") li.classList.add(`level-${level}`);
+    const time = document.createElement("span");
+    time.className = "metric-log-time";
+    time.textContent = new Date(entry.timestamp).toLocaleTimeString([], { hour12: false });
+    const nameEl = document.createElement("span");
+    nameEl.className = "metric-log-name";
+    nameEl.textContent = entry.name;
+    const msg = document.createElement("span");
+    msg.className = "metric-log-msg";
+    msg.textContent = entry.message;
+    li.append(time, nameEl, msg);
+    metricLogsList.append(li);
+  }
+}
+
+function updateStatusbar(): void {
+  const experiment = experimentId
+    ? experimentsCache.find((item) => String(item.id) === experimentId)
+    : undefined;
+  const experimentLabel = experiment ? String(experiment.name ?? "experiment") : "no experiment";
+  const world = selectedWorld();
+  const worldLabel = String(world?.name ?? selectedWorldId);
+  const armLabel = defaultRobotId || "none";
+  const count = metrics.size;
+  statusText.textContent =
+    `${experimentLabel} · ${worldLabel} · arm ${armLabel} · ${count} metric${count === 1 ? "" : "s"}`;
+}
+
+let metricFrameQueued = false;
+let metricStructureDirty = false;
+
+// Coalesces redraws into one animation frame. `structural` rebuilds the grid
+// and catalog DOM (pin changes, new metric names); otherwise canvases are just
+// redrawn in place against fresh data or a resized layout.
+function scheduleMetricRender(structural = false): void {
+  if (structural) metricStructureDirty = true;
+  if (metricFrameQueued) return;
+  metricFrameQueued = true;
+  requestAnimationFrame(() => {
+    metricFrameQueued = false;
+    if (metricStructureDirty) {
+      metricStructureDirty = false;
+      renderMetricGrid();
+      renderMetricCatalog();
+      renderMetricLogs();
+    }
+    redrawMetricGrid();
+    redrawMetricCatalog();
+    updateStatusbar();
+  });
+}
+
+function toggleMetricPin(name: string): void {
+  if (pinnedMetrics.has(name)) pinnedMetrics.delete(name);
+  else pinnedMetrics.add(name);
+  savePinnedMetrics();
+  scheduleMetricRender(true);
 }
 
 function renderEvents(events: JsonObject[]): void {
   chatLog.replaceChildren();
-  phSamples.length = 0;
+  resetMetricData();
   for (const event of events) {
     const type = String(event.type ?? "");
     const role = String(event.role ?? "system");
@@ -320,12 +677,12 @@ function renderEvents(events: JsonObject[]): void {
     if (type === "tool_response") appendToolBubble(String(event.name ?? "tool"), content);
     if (type === "error") appendChat("error", String(content.message ?? content.text ?? ""));
     if (type === "ph_sample") {
-      const v = Number(content.value);
-      const t = Number(content.timestamp);
-      if (Number.isFinite(v) && Number.isFinite(t)) phSamples.push({ value: v, timestamp: t });
+      ingestSample("pH", Number(content.value), Number(content.timestamp), { min: 0, max: 14 });
     }
+    if (type === "metric_sample") ingestMetricSampleEvent(content);
+    if (type === "metric_log") ingestMetricLogEvent(content);
   }
-  drawPhChart();
+  scheduleMetricRender(true);
 }
 
 function closeAppbarMenus(): void {
@@ -488,6 +845,7 @@ function syncSelectedWorldState(): void {
   for (const li of worldsList.querySelectorAll<HTMLLIElement>(".world-card")) {
     li.classList.toggle("active", li.dataset.worldId === selectedWorldId);
   }
+  updateStatusbar();
 }
 
 function worldEntities(worldId: string): JsonObject[] {
@@ -832,6 +1190,7 @@ async function clearActiveExperiment(): Promise<void> {
   setActiveExperimentLabel("No experiment", false);
   updateExperimentsListSelection();
   updateNotesPane();
+  updateStatusbar();
   await loadEvents();
   void refreshArtifacts();
   renderPickerMenus();
@@ -1277,8 +1636,8 @@ async function submitWorldModal(): Promise<void> {
 
 async function loadEvents(): Promise<void> {
   if (!experimentId) {
-    phSamples.length = 0;
-    drawPhChart();
+    resetMetricData();
+    scheduleMetricRender(true);
     return;
   }
   const result = await window.chem0.listEvents(experimentId);
@@ -1427,9 +1786,13 @@ const sidebarTabBindings = {
     initialTab: SIDEBAR_TABS.rhs,
     onActivate: (tab) => {
       SIDEBAR_TABS.rhs = tab;
-      if (!workspace.classList.contains("rhs-collapsed")) return;
-      workspace.classList.remove("rhs-collapsed");
-      updateToggleButtonStates();
+      if (workspace.classList.contains("rhs-collapsed")) {
+        workspace.classList.remove("rhs-collapsed");
+        updateToggleButtonStates();
+      }
+      // Catalog canvases have zero size while the pane is hidden; redraw once
+      // it becomes visible (e.g. switching to the Metrics tab).
+      scheduleMetricRender();
     },
     paneRoot: rhsSidebar
   })
@@ -1449,12 +1812,12 @@ function updateToggleButtonStates(): void {
 toggleLhsBtn.addEventListener("click", () => {
   workspace.classList.toggle("lhs-collapsed");
   updateToggleButtonStates();
-  drawPhChart();
+  scheduleMetricRender();
 });
 toggleRhsBtn.addEventListener("click", () => {
   workspace.classList.toggle("rhs-collapsed");
   updateToggleButtonStates();
-  drawPhChart();
+  scheduleMetricRender();
 });
 
 updateToggleButtonStates();
@@ -1462,6 +1825,10 @@ updateToggleButtonStates();
 /* --------------------------- boot & actions --------------------------- */
 
 async function boot(): Promise<void> {
+  // pH is the canonical live sensor stream; register it up front so its
+  // catalog row and pinned 0–14 chart exist before the first sample arrives.
+  registerMetric("pH", { min: 0, max: 14 });
+  scheduleMetricRender(true);
   const [tools] = await Promise.all([window.chem0.listTools(), refreshWorlds()]);
   await refreshExperiments();
   const defaultRobot = await window.chem0.callTool("get_default_robot", { world_id: selectedWorldId });
@@ -1632,6 +1999,7 @@ async function startVoiceRecording(): Promise<void> {
   mediaRecorder.start();
   recordAudio.classList.add("recording");
   recordAudio.setAttribute("aria-label", "Stop recording");
+  statusRecDot.hidden = false;
   appendChat("system", "Recording human audio…");
 }
 
@@ -1643,6 +2011,7 @@ async function stopVoiceRecording(): Promise<void> {
   await stopped;
   recordAudio.classList.remove("recording");
   recordAudio.setAttribute("aria-label", "Record voice");
+  statusRecDot.hidden = true;
   const blob = new Blob(recordedChunks, { type: recorder.mimeType || "audio/webm" });
   mediaRecorder = null;
   const result = await call("listen_to_human", {
@@ -1677,12 +2046,15 @@ window.chem0.onAgentEvent((event) => {
     bumpInFlightIdle();
   }
   if (event.type === "ph_sample") {
-    const v = Number(event.value);
-    const t = Number(event.timestamp);
-    if (Number.isFinite(v) && Number.isFinite(t)) {
-      phSamples.push({ value: v, timestamp: t });
-      drawPhChart();
-    }
+    const isNew = ingestSample("pH", Number(event.value), Number(event.timestamp), { min: 0, max: 14 });
+    scheduleMetricRender(isNew);
+  }
+  if (event.type === "metric_sample") {
+    scheduleMetricRender(ingestMetricSampleEvent(event));
+  }
+  if (event.type === "metric_log") {
+    ingestMetricLogEvent(event);
+    scheduleMetricRender(true);
   }
   if (event.type === "error") {
     appendChat("error", String(event.message ?? ""));
@@ -1690,8 +2062,10 @@ window.chem0.onAgentEvent((event) => {
   }
 });
 
-window.addEventListener("resize", () => drawPhChart());
+window.addEventListener("resize", () => scheduleMetricRender());
 window.addEventListener("chem0:virtual-camera-frame", updateWorldPreviewCanvases);
+// Charts read their colors from CSS variables, so a theme switch needs a redraw.
+window.chem0.onSettingsChanged(() => scheduleMetricRender());
 
 /* --------------------------- toolbar tooltips --------------------------- */
 
