@@ -18,6 +18,12 @@ Read these files before operating hardware:
 7. `docs/desktop.md`
 8. `docs/troubleshooting.md`
 
+## Branching Policy
+
+Work directly on `main` by default. This project moves quickly enough that
+feature branches tend to become stale before they are useful; avoid creating
+feature branches unless a human explicitly asks for one.
+
 ## Known Local Defaults
 
 ```text
