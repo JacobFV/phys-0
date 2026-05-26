@@ -1,15 +1,10 @@
-# chem-0
+# phys-0
 
-<p align="center">
-  <strong>Attention:</strong> active follow-on work has moved to
-  <a href="https://github.com/JacobFV/phys-0">JacobFV/phys-0</a>.
-</p>
-
-![chem-0 robot arm welcome image](assets/robot_lab_scene.png)
+![phys-0 robot arm welcome image](assets/robot_lab_scene.png)
 
 ## A small research project in embodied laboratory automation
 
-`chem-0` explores a practical question:
+`phys-0` explores a practical question:
 
 > Can a language-model agent safely operate a low-cost robot arm while using a
 > live camera feed as its visual feedback loop?
@@ -32,7 +27,7 @@ The project is intentionally small enough to understand at a science-fair table:
 ## Why This Matters
 
 Many lab automation demos assume expensive industrial hardware, custom GUIs, or
-hard-coded scripts. `chem-0` asks whether a simple open-source interface can
+hard-coded scripts. `phys-0` asks whether a simple open-source interface can
 make robot control more inspectable:
 
 - Every command is a named tool call, whether it came from MCP or Electron.
@@ -56,10 +51,10 @@ hardware.
 
 ```text
 src/lib/backend/          TypeScript Node backend: experiments, SQLite, blobs, GPT-5.5, Python bridge
-src/lib/chem0/            Python hardware core: robot, camera, kinematics, tool handlers
+src/lib/phys0/            Python hardware core: robot, camera, kinematics, tool handlers
 src/apps/mcp-node/        TypeScript stdio MCP server entrypoint
 src/apps/python-bridge/   Line-delimited JSON bridge from Node to Python core
-src/apps/electron/        Chem-0 Lab Console desktop app
+src/apps/electron/        Phys-0 Lab Console desktop app
 scripts/                  Setup, dependency, and deterministic calibration scripts
 assets/                   Welcome image and SO-101 kinematic URDF
 docs/                     Detailed setup, operations, testing, and references
@@ -73,15 +68,15 @@ CLAUDE.md                 Same as AGENTS.md
 ```mermaid
 flowchart LR
     agent["MCP Client / LLM Agent<br/>Codex, Claude, Gemini, etc."]
-    desktop["Chem-0 Lab Console<br/><code>src/apps/electron</code>"]
+    desktop["Phys-0 Lab Console<br/><code>src/apps/electron</code>"]
     mcp["Node stdio MCP Server<br/><code>src/apps/mcp-node</code>"]
-    backend["Shared Node Backend<br/><code>@chem0/backend</code>"]
-    db["SQLite Experiment Store<br/><code>data/chem0.sqlite</code>"]
+    backend["Shared Node Backend<br/><code>@phys0/backend</code>"]
+    db["SQLite Experiment Store<br/><code>data/phys0.sqlite</code>"]
     blobs["Blob Store<br/><code>data/blobs</code>"]
     openai["OpenAI Responses API<br/><code>gpt-5.5</code>"]
     audio["Voice I/O<br/><code>speak_to_human</code><br/><code>listen_to_human</code>"]
     bridge["Python Bridge<br/><code>src/apps/python-bridge</code>"]
-    core["Python Core<br/><code>src/lib/chem0</code>"]
+    core["Python Core<br/><code>src/lib/phys0</code>"]
     pose["Pose Table Resource<br/><code>lerobot://pose-table</code>"]
     ik["SO-101 FK / IK<br/><code>placo</code> + URDF"]
     safety["Validation + Step Interpolation<br/>joint limits, workspace, max_step"]
@@ -317,7 +312,7 @@ npm run build
 node src/apps/mcp-node/dist/server.js
 ```
 
-Run Chem-0 Lab Console:
+Run Phys-0 Lab Console:
 
 ```sh
 npm install
@@ -329,7 +324,7 @@ Mount it in Codex:
 ```json
 {
   "mcpServers": {
-    "chem-0": {
+    "phys-0": {
       "command": "node",
       "args": [
         "/Users/vibestartup/Code/lerobot-test/src/apps/mcp-node/dist/server.js"
@@ -343,7 +338,7 @@ Mount it in Codex:
 Then ask the agent:
 
 ```text
-Use the chem-0 MCP. Create an experiment first, pass its experiment_id into
+Use the phys-0 MCP. Create an experiment first, pass its experiment_id into
 tool calls, read lerobot://pose-table, list cameras, view camera 0, probe the
 LeRobot servos, connect to the SO101 arm, observe the current pose, then use
 get_arm_pose/set_arm_pose for joint-space moves or get_position/set_position
@@ -418,5 +413,5 @@ Known limitation:
 ## Repository
 
 ```text
-https://github.com/JacobFV/chem-0
+https://github.com/JacobFV/phys-0
 ```

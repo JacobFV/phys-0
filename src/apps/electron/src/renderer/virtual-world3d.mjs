@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import RAPIER from "@dimforge/rapier3d-compat";
 import { STLLoader } from "./vendor/STLLoader.js";
 import { TransformControls } from "./vendor/TransformControls.js";
 
@@ -138,7 +139,8 @@ fillLight.position.set(-1.0, 1.2, 0.8);
 scene.add(fillLight);
 
 const FLOOR_Z = 0;
-const GRAVITY_M_PER_FRAME = 0.006;
+const FIXED_PHYSICS_TIMESTEP_S = 1 / 60;
+const MAX_PHYSICS_STEPS_PER_FRAME = 5;
 const PHYSICS_WATCHDOG_INTERVAL_MS = 1000;
 const PHYSICS_PERSIST_SETTLE_MS = 250;
 const PHYSICS_PERSIST_INTERVAL_MS = 600;
@@ -179,7 +181,25 @@ let robotAsset = null;
 let rebuildSequence = 0;
 let lastPhysicsPersistMs = 0;
 let lastPhysicsChangeMs = 0;
+let lastAnimationMs = performance.now();
+let physicsAccumulatorS = 0;
 const physicsDirtyIds = new Set();
+
+let rapierModule = null;
+let rapierReady = RAPIER.init({})
+  .then(() => {
+    rapierModule = RAPIER;
+    rebuildPhysicsWorld();
+  })
+  .catch((error) => {
+    console.error("Rapier physics initialization failed.", error);
+    showDropStatus("Rapier physics unavailable", true);
+    return null;
+  });
+let physicsWorld = null;
+let groundBody = null;
+let groundCollider = null;
+const physicsBodies = new Map();
 
 const materials = {
   arm: new THREE.MeshStandardMaterial({ color: PALETTE[currentTheme()].arm, roughness: 0.55 }),
@@ -1380,6 +1400,7 @@ async function rebuild(state) {
     });
   }
   attachSelected();
+  rebuildPhysicsWorld();
   settleRigidBodies(true);
   updateCollisions();
 }
@@ -1405,10 +1426,6 @@ function rigidBodyEntity(entity) {
   return String(entity.kind) === "rigid_body" && entity.collision_enabled === true;
 }
 
-function boxesOverlapXY(a, b) {
-  return a.max.x > b.min.x && a.min.x < b.max.x && a.max.y > b.min.y && a.min.y < b.max.y;
-}
-
 function poseFromGroup(entity, group) {
   return {
     ...entityPose(entity),
@@ -1427,54 +1444,148 @@ function persistGroupPose(id, group) {
   void editorApi()?.updateEntityPose?.(id, poseFromGroup(entity, group));
 }
 
-function supportZFor(id, box) {
-  let support = FLOOR_Z;
-  for (const entity of entities) {
-    const otherId = String(entity.id);
-    if (otherId === id || !rigidBodyEntity(entity)) continue;
-    const other = objects.get(otherId);
-    if (!other) continue;
-    const otherBox = boxFromObjectWithoutSelectionOutline(other);
-    if (!boxesOverlapXY(box, otherBox)) continue;
-    if (otherBox.max.z <= box.max.z - CONTACT_EPSILON_M) {
-      support = Math.max(support, otherBox.max.z);
-    }
+function colliderDescriptorForEntity(entity, group) {
+  const spec = entitySpec(entity);
+  const shape = String(spec.collision_shape || spec.shape || "");
+  if (shape === "cylinder") {
+    const radius = Math.max(0.001, Number(spec.radius_m) || 0.025);
+    const height = Math.max(0.001, Number(spec.height_m) || 0.05);
+    return rapierModule.ColliderDesc.cylinder(height / 2, radius).setTranslation(0, 0, height / 2);
   }
-  return support;
+  if (shape === "sphere" || shape === "ball") {
+    const radius = Math.max(0.001, Number(spec.radius_m) || 0.025);
+    return rapierModule.ColliderDesc.ball(radius).setTranslation(0, 0, radius);
+  }
+  if (shape === "mesh" || shape === "convex_hull" || String(entity.kind) === "arm") {
+    const box = boxFromObjectWithoutSelectionOutline(group);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3()).sub(group.position);
+    return rapierModule.ColliderDesc.cuboid(
+      Math.max(0.001, size.x / 2),
+      Math.max(0.001, size.y / 2),
+      Math.max(0.001, size.z / 2)
+    ).setTranslation(center.x, center.y, center.z);
+  }
+  const dims = Array.isArray(spec.dimensions_m) ? spec.dimensions_m.map(Number) : [0.05, 0.05, 0.05];
+  const width = Math.max(0.001, dims[0] || 0.05);
+  const depth = Math.max(0.001, dims[1] || 0.05);
+  const height = Math.max(0.001, dims[2] || 0.05);
+  return rapierModule.ColliderDesc.cuboid(width / 2, depth / 2, height / 2).setTranslation(0, 0, height / 2);
 }
 
-function settleRigidBodies(markDirty = true) {
+function bodyDescriptorForEntity(entity, group) {
+  const kind = String(entity.kind);
+  const spec = entitySpec(entity);
+  let bodyDesc;
+  if (kind === "rigid_body" && entity.collision_enabled === true) {
+    bodyDesc = spec.static === true ? rapierModule.RigidBodyDesc.fixed() : rapierModule.RigidBodyDesc.dynamic();
+  } else {
+    bodyDesc = rapierModule.RigidBodyDesc.kinematicPositionBased();
+  }
+  const q = group.quaternion;
+  bodyDesc.setTranslation(group.position.x, group.position.y, group.position.z);
+  bodyDesc.setRotation({ x: q.x, y: q.y, z: q.z, w: q.w });
+  if (typeof spec.mass_kg === "number" && Number.isFinite(spec.mass_kg)) bodyDesc.setAdditionalMass(Math.max(0.001, spec.mass_kg));
+  if (typeof spec.gravity_scale === "number" && Number.isFinite(spec.gravity_scale)) bodyDesc.setGravityScale(spec.gravity_scale, true);
+  return bodyDesc;
+}
+
+function clearPhysicsWorld() {
+  physicsWorld = null;
+  groundBody = null;
+  groundCollider = null;
+  physicsBodies.clear();
+  physicsAccumulatorS = 0;
+}
+
+function ensurePhysicsWorld() {
+  if (!rapierModule) return null;
+  if (physicsWorld) return physicsWorld;
+  physicsWorld = new rapierModule.World({ x: 0, y: 0, z: -9.81 });
+  physicsWorld.integrationParameters.dt = FIXED_PHYSICS_TIMESTEP_S;
+  groundBody = physicsWorld.createRigidBody(rapierModule.RigidBodyDesc.fixed().setTranslation(0, 0, FLOOR_Z - 0.0025));
+  groundCollider = physicsWorld.createCollider(
+    rapierModule.ColliderDesc.cuboid(FLOOR_SIZE_M / 2, FLOOR_SIZE_M / 2, 0.0025),
+    groundBody
+  );
+  return physicsWorld;
+}
+
+function rebuildPhysicsWorld() {
+  if (!rapierModule) return;
+  clearPhysicsWorld();
+  const world = ensurePhysicsWorld();
+  if (!world) return;
+  const sorted = [...entities].sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  for (const entity of sorted) {
+    if (!collidable(entity)) continue;
+    const id = String(entity.id);
+    const group = objects.get(id);
+    if (!group) continue;
+    const body = world.createRigidBody(bodyDescriptorForEntity(entity, group));
+    const collider = world.createCollider(colliderDescriptorForEntity(entity, group), body);
+    physicsBodies.set(id, { body, collider });
+  }
+}
+
+function syncPhysicsFromTransforms() {
+  if (!physicsWorld) return;
+  for (const entity of entities) {
+    if (!collidable(entity)) continue;
+    const id = String(entity.id);
+    const entry = physicsBodies.get(id);
+    const group = objects.get(id);
+    if (!entry || !group) continue;
+    const q = group.quaternion;
+    if (entry.body.isKinematic()) {
+      entry.body.setNextKinematicTranslation({ x: group.position.x, y: group.position.y, z: group.position.z });
+      entry.body.setNextKinematicRotation({ x: q.x, y: q.y, z: q.z, w: q.w });
+    } else if (draggingTransform && id === selectedId) {
+      entry.body.setTranslation({ x: group.position.x, y: group.position.y, z: group.position.z }, true);
+      entry.body.setRotation({ x: q.x, y: q.y, z: q.z, w: q.w }, true);
+      entry.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+      entry.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+    }
+  }
+}
+
+function syncTransformsFromPhysics(markDirty = true) {
   let changed = false;
-  const rigidEntities = entities.filter(rigidBodyEntity);
-  for (let pass = 0; pass < Math.max(1, rigidEntities.length); pass += 1) {
-    let passChanged = false;
-    for (const entity of rigidEntities) {
-      const id = String(entity.id);
-      const group = objects.get(id);
-      if (!group) continue;
-      const box = boxFromObjectWithoutSelectionOutline(group);
-      const support = supportZFor(id, box);
-      const delta = box.min.z - support;
-      if (Math.abs(delta) <= CONTACT_EPSILON_M) continue;
-      if (delta > 0) {
-        const fall = Math.min(GRAVITY_M_PER_FRAME, delta);
-        group.position.z -= fall;
-        if (!draggingTransform) {
-          group.rotation.x += 0.012 * Math.min(1, delta / GRAVITY_M_PER_FRAME);
-          group.rotation.y += 0.008 * Math.min(1, delta / GRAVITY_M_PER_FRAME);
-        }
-      } else {
-        group.position.z -= delta;
-      }
+  for (const entity of entities) {
+    if (!rigidBodyEntity(entity)) continue;
+    const id = String(entity.id);
+    const entry = physicsBodies.get(id);
+    const group = objects.get(id);
+    if (!entry || !group || entry.body.isKinematic()) continue;
+    const t = entry.body.translation();
+    const r = entry.body.rotation();
+    if (
+      Math.abs(group.position.x - t.x) > 0.00001 ||
+      Math.abs(group.position.y - t.y) > 0.00001 ||
+      Math.abs(group.position.z - t.z) > 0.00001 ||
+      Math.abs(group.quaternion.x - r.x) > 0.00001 ||
+      Math.abs(group.quaternion.y - r.y) > 0.00001 ||
+      Math.abs(group.quaternion.z - r.z) > 0.00001 ||
+      Math.abs(group.quaternion.w - r.w) > 0.00001
+    ) {
+      group.position.set(t.x, t.y, t.z);
+      group.quaternion.set(r.x, r.y, r.z, r.w);
       if (markDirty) physicsDirtyIds.add(id);
       lastPhysicsChangeMs = performance.now();
-      passChanged = true;
       changed = true;
     }
-    if (!passChanged) break;
   }
   if (changed) updateCollisions();
   return changed;
+}
+
+function settleRigidBodies(markDirty = true, dtS = FIXED_PHYSICS_TIMESTEP_S) {
+  const world = ensurePhysicsWorld();
+  if (!world) return false;
+  syncPhysicsFromTransforms();
+  world.integrationParameters.dt = dtS;
+  world.step();
+  return syncTransformsFromPhysics(markDirty);
 }
 
 function persistPhysicsIfNeeded(now, force = false) {
@@ -1490,6 +1601,26 @@ function persistPhysicsIfNeeded(now, force = false) {
 }
 
 function collisionPairs() {
+  if (physicsWorld && physicsBodies.size > 0) {
+    const collisions = new Set();
+    const colliderToId = new Map();
+    for (const [id, entry] of physicsBodies) colliderToId.set(entry.collider.handle, id);
+    for (const [id, entry] of physicsBodies) {
+      physicsWorld.contactPairsWith(entry.collider, (other) => {
+        const otherId = colliderToId.get(other.handle);
+        if (!otherId || otherId === id) return;
+        collisions.add(id);
+        collisions.add(otherId);
+      });
+      physicsWorld.intersectionPairsWith(entry.collider, (other) => {
+        const otherId = colliderToId.get(other.handle);
+        if (!otherId || otherId === id) return;
+        collisions.add(id);
+        collisions.add(otherId);
+      });
+    }
+    return collisions;
+  }
   const groups = entities
     .filter(collidable)
     .map((entity) => ({ entity, group: objects.get(String(entity.id)), box: new THREE.Box3() }))
@@ -1591,7 +1722,7 @@ renderer.domElement.addEventListener("pointerup", (event) => {
 });
 
 function dragKind(event) {
-  const kind = event.dataTransfer?.getData("application/x-chem0-asset") || event.dataTransfer?.getData("text/plain") || "";
+  const kind = event.dataTransfer?.getData("application/x-phys0-asset") || event.dataTransfer?.getData("text/plain") || "";
   return /^[a-z0-9_]+$/i.test(kind) ? kind : "";
 }
 
@@ -1654,7 +1785,16 @@ installTransformEvents(rotateTransform);
 
 function runPhysicsWatchdog(forcePersist = false) {
   const now = performance.now();
-  settleRigidBodies(true);
+  const dtS = Math.min(0.1, Math.max(0, (now - lastAnimationMs) / 1000));
+  lastAnimationMs = now;
+  physicsAccumulatorS += dtS;
+  let steps = 0;
+  while (physicsAccumulatorS >= FIXED_PHYSICS_TIMESTEP_S && steps < MAX_PHYSICS_STEPS_PER_FRAME) {
+    settleRigidBodies(true, FIXED_PHYSICS_TIMESTEP_S);
+    physicsAccumulatorS -= FIXED_PHYSICS_TIMESTEP_S;
+    steps += 1;
+  }
+  if (forcePersist && steps === 0) settleRigidBodies(true, FIXED_PHYSICS_TIMESTEP_S);
   persistPhysicsIfNeeded(now, forcePersist);
 }
 

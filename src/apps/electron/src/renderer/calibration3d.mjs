@@ -481,7 +481,7 @@ async function refreshRobots() {
   startStatus.textContent = "Scanning for arms…";
   startButton.disabled = true;
   try {
-    const parsed = parseToolJson(await window.chem0.callTool("list_connected_robots", { max_id: 12 }));
+    const parsed = parseToolJson(await window.phys0.callTool("list_connected_robots", { max_id: 12 }));
     const robots = Array.isArray(parsed.robots) ? parsed.robots : [];
     robotSelect.replaceChildren();
     for (const robot of robots) {
@@ -515,7 +515,7 @@ async function pollLivePositions() {
   const port = selectedPort();
   if (!port) return;
   try {
-    const result = await window.chem0.callTool("read_so101_raw_positions", { port });
+    const result = await window.phys0.callTool("read_so101_raw_positions", { port });
     if (result?.isError) return;
     const parsed = parseToolJson(result);
     livePositions = Object.fromEntries(Object.entries(parsed.positions ?? {}).map(([joint, value]) => [joint, Number(value)]));
@@ -572,7 +572,7 @@ async function handleStart() {
   try {
     const port = selectedPort();
     if (!port) throw new Error("Select an arm first.");
-    const result = await window.chem0.callTool("prepare_so101_calibration", { port });
+    const result = await window.phys0.callTool("prepare_so101_calibration", { port });
     const errMsg = toolErrorMessage(result);
     if (errMsg) throw new Error(errMsg);
     const parsed = parseToolJson(result);
@@ -615,7 +615,7 @@ async function doRecord() {
   const step = currentStep();
   if (!step) return null;
   try {
-    const result = await window.chem0.callTool("read_so101_calibration_endpoint", {
+    const result = await window.phys0.callTool("read_so101_calibration_endpoint", {
       port: selectedPort(),
       joint: step.joint,
       samples: 5
@@ -637,7 +637,7 @@ async function doRecord() {
 
 async function doFinish() {
   try {
-    const result = await window.chem0.callTool("finalize_so101_calibration", {
+    const result = await window.phys0.callTool("finalize_so101_calibration", {
       port: selectedPort(),
       robot_id: selectedRobotId(),
       records,

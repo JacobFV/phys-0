@@ -5,8 +5,8 @@
 node_modules/
 data/blobs
 data/demo_logs
-data/chem0.sqlite
-data/chem0.sqlite.backup-*
+data/phys0.sqlite
+data/phys0.sqlite.backup-*
 data/settings.json
 data/audio
 .claude/

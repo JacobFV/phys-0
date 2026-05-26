@@ -18,7 +18,7 @@ The backend creates local data under:
 
 ```text
 data/
-  chem0.sqlite
+  phys0.sqlite
   blobs/
 ```
 
@@ -95,7 +95,7 @@ be tracked.
 
 ## GPT-5.5 Agent Sessions
 
-The Electron app sends user messages to `Chem0Backend.streamAgentMessage`.
+The Electron app sends user messages to `Phys0Backend.streamAgentMessage`.
 The backend calls the OpenAI Responses API with `gpt-5.5`, streams deltas to
 the GUI, handles model-requested tool calls, and persists every event.
 

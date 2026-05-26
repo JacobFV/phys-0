@@ -265,10 +265,10 @@ async function createRobotView(robot) {
 }
 
 async function refreshRobotViews() {
-  if (!rootEl || !window.chem0) return;
+  if (!rootEl || !window.phys0) return;
   const [parsed, worldState] = await Promise.all([
-    window.chem0.callTool("list_connected_robots", { max_id: 12 }).then(parseToolJson),
-    window.chem0.callTool("list_worlds", {})
+    window.phys0.callTool("list_connected_robots", { max_id: 12 }).then(parseToolJson),
+    window.phys0.callTool("list_worlds", {})
   ]);
   const selectedWorld = Array.isArray(worldState.worlds)
     ? worldState.worlds.find((world) => String(world.id) === selectedWorldId)
@@ -297,7 +297,7 @@ async function refreshRobotViews() {
   for (const robot of robots) await createRobotView(robot);
 }
 
-window.addEventListener("chem0:world-selected", (event) => {
+window.addEventListener("phys0:world-selected", (event) => {
   const detail = event.detail || {};
   selectedWorldId = String(detail.worldId || selectedWorldId);
   void refreshRobotViews();
@@ -306,7 +306,7 @@ window.addEventListener("chem0:world-selected", (event) => {
 async function pollPoses() {
   for (const view of robotViews.values()) {
     try {
-      const parsed = parseToolJson(await window.chem0.callTool("read_so101_raw_positions", { port: view.port }));
+      const parsed = parseToolJson(await window.phys0.callTool("read_so101_raw_positions", { port: view.port }));
       view.positions = Object.fromEntries(Object.entries(parsed.positions ?? {}).filter(([joint]) => JOINTS.includes(joint)));
       setRobotPose(view.model, view.positions);
     } catch {

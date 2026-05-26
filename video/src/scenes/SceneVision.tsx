@@ -15,7 +15,7 @@ import { palette, type } from "../theme";
 //   2. find_vials_with_blue_cap → ROI overlay
 //   3. liquid sample under cap → HSV histogram + bromothymol reference
 //   4. classify → pH bucket
-// All values mirror the real code in src/lib/chem0/vision.py.
+// All values mirror the real code in src/lib/phys0/vision.py.
 export const SceneVision: React.FC = () => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
@@ -48,7 +48,7 @@ export const SceneVision: React.FC = () => {
           textTransform: "uppercase",
         }}
       >
-        vii · vision · src/lib/chem0/vision.py
+        vii · vision · src/lib/phys0/vision.py
       </div>
       <div
         style={{

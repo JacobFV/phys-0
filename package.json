@@ -1,5 +1,5 @@
 {
-  "name": "chem-0",
+  "name": "phys-0",
   "version": "0.1.0",
   "private": true,
   "workspaces": [
@@ -9,17 +9,22 @@
     "src/apps/phys0-cli"
   ],
   "scripts": {
-    "backend:build": "npm --workspace @chem0/backend run build",
-    "mcp:build": "npm --workspace @chem0/mcp run build",
-    "electron:build": "npm --workspace @chem0/electron run build",
+    "backend:build": "npm --workspace @phys0/backend run build",
+    "mcp:build": "npm --workspace @phys0/mcp run build",
+    "electron:build": "npm --workspace @phys0/electron run build",
     "phys0:build": "npm --workspace @phys0/cli run build",
     "phys0": "npm --workspace @phys0/cli exec phys0 --",
-    "electron:dev": "npm --workspace @chem0/electron run dev",
-    "electron:watch": "npm --workspace @chem0/electron run watch",
+    "electron:dev": "npm --workspace @phys0/electron run dev",
+    "electron:watch": "npm --workspace @phys0/electron run watch",
     "calibrate:so101": "PYTHONPATH=src/lib .venv/bin/python scripts/calibrate_so101_deterministic.py",
+    "smoke:multi-world-sim": "node scripts/smoke_multi_world_sim.js",
+    "smoke:aerial-dynamics": "node scripts/smoke_aerial_dynamics.js",
     "build": "npm run backend:build && npm run mcp:build && npm run electron:build && npm run phys0:build"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "^0.19.3"
   }
 }

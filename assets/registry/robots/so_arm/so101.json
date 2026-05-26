@@ -54,7 +54,7 @@
       "type": "other",
       "description": "Existing calibration workflow keeps deterministic endpoint prompts and separate physical calibration files per robot id.",
       "files": ["scripts/calibrate_so101_deterministic.py", "assets/kinematics/so101_kinematics.urdf"],
-      "author": "chem-0"
+      "author": "phys-0"
     }
   ],
   "validation": {

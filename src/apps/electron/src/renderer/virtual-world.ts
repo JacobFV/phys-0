@@ -3,19 +3,19 @@ type JsonObject = { [key: string]: JsonValue };
 
 export {};
 
-type Chem0Api = {
+type Phys0Api = {
   callTool: (name: string, args?: JsonObject) => Promise<JsonObject>;
   platform: string;
   getSettings: () => Promise<JsonObject>;
   onSettingsChanged: (callback: (settings: JsonObject) => void) => () => void;
 };
 
-const chem0 = (window as unknown as { chem0: Chem0Api }).chem0;
+const phys0 = (window as unknown as { phys0: Phys0Api }).phys0;
 
-window.Chem0Shell.applyPlatformClass(chem0?.platform);
-window.Chem0Shell.installThemeSync({
-  getSettings: () => chem0.getSettings(),
-  onSettingsChanged: (handler) => chem0.onSettingsChanged(handler)
+window.Phys0Shell.applyPlatformClass(phys0?.platform);
+window.Phys0Shell.installThemeSync({
+  getSettings: () => phys0.getSettings(),
+  onSettingsChanged: (handler) => phys0.onSettingsChanged(handler)
 });
 
 const params = new URLSearchParams(window.location.search);
@@ -73,6 +73,7 @@ const subtitleEl = document.querySelector<HTMLElement>("#vw-subtitle")!;
 const assetList = document.querySelector<HTMLUListElement>("#vw-asset-list")!;
 const refreshBtn = document.querySelector<HTMLButtonElement>("#vw-refresh")!;
 const worldNameInput = document.querySelector<HTMLInputElement>("#vw-world-name")!;
+const worldSeedInput = document.querySelector<HTMLInputElement>("#vw-world-seed")!;
 const saveWorldBtn = document.querySelector<HTMLButtonElement>("#vw-save-world")!;
 const selectedEmpty = document.querySelector<HTMLDivElement>("#vw-selected-empty")!;
 const selectedForm = document.querySelector<HTMLDivElement>("#vw-selected-form")!;
@@ -219,14 +220,14 @@ function selectedEntity(): JsonObject | undefined {
 }
 
 const paneBindings = {
-  lhs: window.Chem0Shell.bindPaneTabs({
+  lhs: window.Phys0Shell.bindPaneTabs({
     buttonAttr: "data-vw-lhs",
     buttonsSelector: "button[data-vw-lhs]",
     initialTab: "toolbox",
     paneAttr: "data-vw-pane",
     paneRoot: document.querySelector<HTMLElement>(".vw-sidebar.lhs") ?? document
   }),
-  rhs: window.Chem0Shell.bindPaneTabs({
+  rhs: window.Phys0Shell.bindPaneTabs({
     buttonAttr: "data-vw-rhs",
     buttonsSelector: "button[data-vw-rhs]",
     initialTab: "world",
@@ -242,7 +243,7 @@ function activatePane(side: "lhs" | "rhs", pane: string): void {
   paneBindings[side].activate(pane);
 }
 
-window.Chem0Shell.installToolbarTooltips();
+window.Phys0Shell.installToolbarTooltips();
 
 function setTransformMode(mode: "translate" | "rotate"): void {
   transformMode = mode;
@@ -264,6 +265,7 @@ function render(): void {
     titleEl.textContent = String(world.name ?? "Virtual world");
     subtitleEl.textContent = String(world.id ?? worldId);
     worldNameInput.value = String(world.name ?? "");
+    worldSeedInput.value = String(world.seed ?? (world.metadata as JsonObject | undefined)?.seed ?? "");
   }
   renderAssets();
   renderSelected();
@@ -309,7 +311,7 @@ function renderSelected(): void {
 }
 
 async function refresh(): Promise<void> {
-  const result = await chem0.callTool("list_worlds", {});
+  const result = await phys0.callTool("list_worlds", {});
   const worlds = (result.worlds ?? []) as JsonObject[];
   world = worlds.find((item) => String(item.id) === worldId) ?? null;
   entities = ((result.virtual_entities ?? []) as JsonObject[]).filter((entity) => String(entity.world_id) === worldId);
@@ -331,16 +333,16 @@ async function createEntity(kind: string, poseOverride: JsonObject = {}): Promis
     : { tool: "rigid", name: kind, spec: { collision_shape: "box", dimensions_m: [0.05, 0.05, 0.05], asset: kind } };
   const pose = { ...defaultPoseFor(def.tool), ...(def.pose ?? {}), ...poseOverride };
   if (def.tool === "arm") {
-    const result = await chem0.callTool("create_virtual_arm", { world_id: worldId, name: def.name ?? "SO-101 arm", make_default: true, pose });
+    const result = await phys0.callTool("create_virtual_arm", { world_id: worldId, name: def.name ?? "SO-101 arm", make_default: true, pose });
     selectedId = String((result.entity as JsonObject | undefined)?.id ?? "");
   } else if (def.tool === "camera") {
-    const result = await chem0.callTool("create_virtual_camera", { world_id: worldId, name: def.name ?? "Camera", pose, spec: def.spec ?? {} });
+    const result = await phys0.callTool("create_virtual_camera", { world_id: worldId, name: def.name ?? "Camera", pose, spec: def.spec ?? {} });
     selectedId = String((result.entity as JsonObject | undefined)?.id ?? "");
   } else if (def.tool === "light") {
-    const result = await chem0.callTool("create_virtual_light", { world_id: worldId, name: def.name ?? "Light", pose, spec: def.spec ?? {} });
+    const result = await phys0.callTool("create_virtual_light", { world_id: worldId, name: def.name ?? "Light", pose, spec: def.spec ?? {} });
     selectedId = String((result.entity as JsonObject | undefined)?.id ?? "");
   } else {
-    const result = await chem0.callTool("create_virtual_rigid_body", {
+    const result = await phys0.callTool("create_virtual_rigid_body", {
       world_id: worldId,
       name: def.name ?? "Rigid body",
       pose,
@@ -395,7 +397,11 @@ for (const btn of document.querySelectorAll<HTMLButtonElement>("[data-create]"))
 
 refreshBtn.addEventListener("click", () => void refresh());
 saveWorldBtn.addEventListener("click", async () => {
-  await chem0.callTool("update_world", { world_id: worldId, name: worldNameInput.value.trim() || "Virtual world", metadata: (world?.metadata as JsonObject) ?? {} });
+  await phys0.callTool("update_world", {
+    world_id: worldId,
+    name: worldNameInput.value.trim() || "Virtual world",
+    metadata: { ...((world?.metadata as JsonObject) ?? {}), seed: worldSeedInput.value.trim() }
+  });
   await refresh();
 });
 
@@ -411,7 +417,7 @@ async function saveSelected(): Promise<void> {
     pitch: Number(pitchInput.value) || 0,
     yaw: Number(yawInput.value) || 0
   };
-  await chem0.callTool("update_virtual_entity", {
+  await phys0.callTool("update_virtual_entity", {
     entity_id: String(entity.id),
     name: objectNameInput.value.trim() || String(entity.name ?? entity.id),
     pose,
@@ -425,7 +431,7 @@ saveObjectBtn.addEventListener("click", () => void saveSelected());
 deleteObjectBtn.addEventListener("click", async () => {
   const entity = selectedEntity();
   if (!entity || !window.confirm(`Remove ${String(entity.name ?? entity.id)}?`)) return;
-  await chem0.callTool("delete_virtual_entity", { entity_id: String(entity.id) });
+  await phys0.callTool("delete_virtual_entity", { entity_id: String(entity.id) });
   selectedId = "";
   await refresh();
 });
@@ -453,7 +459,7 @@ const editorApi: VirtualWorldEditorApi = {
   updateEntityPose: async (id: string, pose: JsonObject) => {
     const entity = entities.find((item) => String(item.id) === id);
     if (!entity) return;
-    await chem0.callTool("update_virtual_entity", {
+    await phys0.callTool("update_virtual_entity", {
       entity_id: id,
       pose,
       spec: (entity.spec as JsonObject) ?? {},

@@ -1,11 +1,11 @@
-"""OpenCV vision module for chem-0 chemistry experiment.
+"""OpenCV vision module for phys-0 chemistry experiment.
 
 Provides vial detection, bromothymol blue pH inference (calibrated from
 the reference image at ``bromothymol-blue-reference.avif``), multimeter
 probe detection, and DMM display analysis.
 
 Usage:
-    from chem0.vision import capture_frame, find_vials, infer_vial_ph
+    from phys0.vision import capture_frame, find_vials, infer_vial_ph
 """
 
 from __future__ import annotations

@@ -26,12 +26,12 @@ export const SceneStack: React.FC = () => {
     {
       tier: "Node backend (main process)",
       sub: "agent loop · tool registry · experiment & artifact tracking",
-      tags: ["@chem0/backend", "OpenAI Responses API", "gpt-5.5"],
+      tags: ["@phys0/backend", "OpenAI Responses API", "gpt-5.5"],
       tone: "accent",
     },
     {
       tier: "persistence",
-      sub: "data/chem0.sqlite + blob store · every event logged",
+      sub: "data/phys0.sqlite + blob store · every event logged",
       tags: ["SQLite", "BLOB store"],
     },
     {

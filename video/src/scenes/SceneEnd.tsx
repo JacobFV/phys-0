@@ -57,7 +57,7 @@ export const SceneEnd: React.FC = () => {
             letterSpacing: -2,
           }}
         >
-          chem-0
+          phys-0
         </div>
         <div
           style={{
@@ -76,7 +76,7 @@ export const SceneEnd: React.FC = () => {
             opacity: spring({ frame: frame - 18, fps, config: { damping: 220 } }),
           }}
         >
-          github.com/JacobFV/chem-0
+          github.com/JacobFV/phys-0
         </div>
         <div
           style={{

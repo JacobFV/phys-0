@@ -1,12 +1,12 @@
 {
-  "name": "chem0-video",
+  "name": "phys0-video",
   "version": "0.1.0",
   "private": true,
   "description": "Remotion video: the shape of an inquiry that didn't quite finish.",
   "scripts": {
     "start": "remotion studio",
-    "build": "remotion render Main out/chem0.mp4 --concurrency=1",
-    "build:webm": "remotion render Main out/chem0.webm --codec=vp8",
+    "build": "remotion render Main out/phys0.mp4 --concurrency=1",
+    "build:webm": "remotion render Main out/phys0.webm --codec=vp8",
     "still": "remotion still Main out/cover.png --frame=180",
     "upgrade": "remotion upgrade"
   },

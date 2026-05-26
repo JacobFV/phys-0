@@ -1,4 +1,19 @@
-export { Chem0Backend } from "./backend";
+export { Phys0Backend } from "./backend";
+export {
+  normalizeSeed,
+  physicsBodyTypeForEntity,
+  regimesForPhysicsKind,
+  seedFromString,
+  type AerialControlCommand,
+  type AerialControlMode,
+  type PhysicsBodyDescriptor,
+  type PhysicsBodyType,
+  type PhysicsColliderShape,
+  type PhysicsPose,
+  type PhysicsRuntimeFactory,
+  type PhysicsStepResult,
+  type PhysicsWorldRuntime
+} from "./physics";
 export type {
   AgentSession,
   AgentSessionEvent,

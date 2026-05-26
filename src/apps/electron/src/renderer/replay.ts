@@ -3,7 +3,7 @@ type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string
 type JsonObject = { [key: string]: JsonValue };
 
 {
-const api = (window as unknown as { chem0: { callTool: (name: string, args?: Record<string, unknown>) => Promise<JsonObject> } }).chem0;
+const api = (window as unknown as { phys0: { callTool: (name: string, args?: Record<string, unknown>) => Promise<JsonObject> } }).phys0;
 
 function textContent(result: JsonObject): string {
   const c = result.content;

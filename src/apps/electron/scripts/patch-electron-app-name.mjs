@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-const APP_NAME = "Chem-0 Lab Console";
+const APP_NAME = "Phys-0 Lab Console";
 
 if (process.platform !== "darwin") {
   process.exit(0);

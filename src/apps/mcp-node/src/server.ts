@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import path from "node:path";
-import { Chem0Backend, type JsonObject } from "@chem0/backend";
+import { Phys0Backend, type JsonObject } from "@phys0/backend";
 
 const PROTOCOL_VERSION = "2024-11-05";
 const repoRoot = path.resolve(__dirname, "../../../..");
-const backend = new Chem0Backend(repoRoot);
+const backend = new Phys0Backend(repoRoot);
 
 function result(id: unknown, value: unknown): JsonObject {
   return { jsonrpc: "2.0", id: id as never, result: value as never };
@@ -24,7 +24,7 @@ async function handle(request: JsonObject): Promise<JsonObject | null> {
       return result(id, {
         protocolVersion: PROTOCOL_VERSION,
         capabilities: { tools: {}, resources: {} },
-        serverInfo: { name: "chem0-node-mcp", version: "0.2.0" }
+        serverInfo: { name: "phys0-node-mcp", version: "0.2.0" }
       });
     }
     if (method === "resources/list") {

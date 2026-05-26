@@ -30,12 +30,13 @@ import type {
   World,
   WorldType
 } from "./types";
+import { normalizeSeed } from "./physics";
 
 const now = () => new Date().toISOString();
 const id = (prefix: string) => `${prefix}_${Date.now().toString(36)}_${randomUUID().slice(0, 8)}`;
 export const DEFAULT_PHYSICAL_WORLD_ID = "world_physical_default";
 
-export class Chem0Store {
+export class Phys0Store {
   private SQL: SqlJsStatic | null = null;
   private db: Database | null = null;
   readonly dataDir: string;
@@ -44,7 +45,7 @@ export class Chem0Store {
 
   constructor(repoRoot: string, dataDir = path.join(repoRoot, "data")) {
     this.dataDir = dataDir;
-    this.dbPath = path.join(dataDir, "chem0.sqlite");
+    this.dbPath = path.join(dataDir, "phys0.sqlite");
     this.blobDir = path.join(dataDir, "blobs");
   }
 
@@ -63,6 +64,7 @@ export class Chem0Store {
         type text not null,
         status text not null,
         default_robot_id text,
+        seed integer not null default 0,
         created_at text not null,
         updated_at text not null,
         metadata_json text not null
@@ -93,6 +95,7 @@ export class Chem0Store {
         world_id text not null,
         name text not null,
         status text not null,
+        seed integer not null default 0,
         created_at text not null,
         updated_at text not null,
         metadata_json text not null,
@@ -220,29 +223,32 @@ export class Chem0Store {
     this.save();
   }
 
-  createExperiment(name = "Untitled experiment", metadata: JsonObject = {}, worldId = DEFAULT_PHYSICAL_WORLD_ID): Experiment {
+  createExperiment(name = "Untitled experiment", metadata: JsonObject = {}, worldId = DEFAULT_PHYSICAL_WORLD_ID, seed?: unknown): Experiment {
     const world = this.getWorld(worldId);
     if (!world) throw new Error(`Unknown world_id: ${worldId}`);
     const created = now();
+    const experimentSeed = normalizeSeed(seed ?? metadata.seed, `${worldId}:${name}:${created}`);
     const experiment: Experiment = {
       id: id("exp"),
       world_id: worldId,
       name,
       status: "active",
+      seed: experimentSeed,
       created_at: created,
       updated_at: created,
-      metadata
+      metadata: { ...metadata, seed: experimentSeed }
     };
     this.run(
-      "insert into experiments (id, world_id, name, status, created_at, updated_at, metadata_json) values (?, ?, ?, ?, ?, ?, ?)",
+      "insert into experiments (id, world_id, name, status, seed, created_at, updated_at, metadata_json) values (?, ?, ?, ?, ?, ?, ?, ?)",
       [
         experiment.id,
         experiment.world_id,
         experiment.name,
         experiment.status,
+        experiment.seed,
         experiment.created_at,
         experiment.updated_at,
-        JSON.stringify(metadata)
+        JSON.stringify(experiment.metadata)
       ]
     );
     this.save();
@@ -255,6 +261,7 @@ export class Chem0Store {
       world_id: String(row.world_id ?? DEFAULT_PHYSICAL_WORLD_ID),
       name: String(row.name),
       status: String(row.status),
+      seed: Number(row.seed ?? 0) >>> 0,
       created_at: String(row.created_at),
       updated_at: String(row.updated_at),
       metadata: JSON.parse(String(row.metadata_json)) as JsonObject
@@ -269,6 +276,7 @@ export class Chem0Store {
       world_id: String(row.world_id ?? DEFAULT_PHYSICAL_WORLD_ID),
       name: String(row.name),
       status: String(row.status),
+      seed: Number(row.seed ?? 0) >>> 0,
       created_at: String(row.created_at),
       updated_at: String(row.updated_at),
       metadata: JSON.parse(String(row.metadata_json)) as JsonObject
@@ -316,25 +324,28 @@ export class Chem0Store {
     }));
   }
 
-  createWorld(input: { name: string; type: WorldType; metadata?: JsonObject }): World {
+  createWorld(input: { name: string; type: WorldType; metadata?: JsonObject; seed?: unknown }): World {
     if (input.type !== "physical" && input.type !== "virtual") throw new Error("World type must be physical or virtual.");
     const created = now();
+    const worldSeed = normalizeSeed(input.seed ?? input.metadata?.seed, `${input.type}:${input.name}:${created}`);
     const world: World = {
       id: id("world"),
       name: input.name.trim() || (input.type === "physical" ? "Physical world" : "Virtual world"),
       type: input.type,
       status: "active",
       default_robot_id: null,
+      seed: worldSeed,
       created_at: created,
       updated_at: created,
-      metadata: input.metadata ?? {}
+      metadata: { ...(input.metadata ?? {}), seed: worldSeed }
     };
-    this.run("insert into worlds values (?, ?, ?, ?, ?, ?, ?, ?)", [
+    this.run("insert into worlds values (?, ?, ?, ?, ?, ?, ?, ?, ?)", [
       world.id,
       world.name,
       world.type,
       world.status,
       world.default_robot_id,
+      world.seed,
       world.created_at,
       world.updated_at,
       JSON.stringify(world.metadata)
@@ -347,9 +358,12 @@ export class Chem0Store {
     const current = this.getWorld(input.worldId);
     if (!current) throw new Error(`Unknown world_id: ${input.worldId}`);
     const name = typeof input.name === "string" && input.name.trim() ? input.name.trim() : current.name;
-    const metadata = input.metadata ?? current.metadata;
-    this.run("update worlds set name = ?, metadata_json = ?, updated_at = ? where id = ?", [
+    const metadata = { ...current.metadata, ...input.metadata };
+    const seed = normalizeSeed(metadata.seed ?? current.seed, current.id);
+    metadata.seed = seed;
+    this.run("update worlds set name = ?, seed = ?, metadata_json = ?, updated_at = ? where id = ?", [
       name,
+      seed,
       JSON.stringify(metadata),
       now(),
       input.worldId
@@ -448,6 +462,25 @@ export class Chem0Store {
   getWorldEntity(entityId: string): PhysEntity | null {
     const row = this.query("select * from world_entities where id = ? limit 1", [entityId])[0];
     return row ? this.physEntityFromRow(row) : null;
+  }
+
+  updateWorldEntity(input: { entityId: string; state?: JsonObject; pose?: JsonObject | null; metadata?: JsonObject }): PhysEntity {
+    const current = this.getWorldEntity(input.entityId);
+    if (!current) throw new Error(`Unknown entity_id: ${input.entityId}`);
+    const state = input.state ?? current.state;
+    const pose = input.pose === undefined ? current.pose : input.pose;
+    const metadata = input.metadata ?? current.metadata;
+    this.run("update world_entities set state_json = ?, pose_json = ?, metadata_json = ?, updated_at = ? where id = ?", [
+      JSON.stringify(state),
+      pose == null ? null : JSON.stringify(pose),
+      JSON.stringify(metadata),
+      now(),
+      input.entityId
+    ]);
+    this.save();
+    const updated = this.getWorldEntity(input.entityId);
+    if (!updated) throw new Error(`Unknown entity_id: ${input.entityId}`);
+    return updated;
   }
 
   addField(input: {
@@ -961,6 +994,24 @@ export class Chem0Store {
     if (!this.hasColumn("agent_sessions", "world_id")) {
       this.exec(`alter table agent_sessions add column world_id text not null default '${DEFAULT_PHYSICAL_WORLD_ID}'`);
     }
+    if (!this.hasColumn("worlds", "seed")) {
+      this.exec("alter table worlds add column seed integer not null default 0");
+      for (const row of this.query("select id, metadata_json from worlds")) {
+        const metadata = JSON.parse(String(row.metadata_json ?? "{}")) as JsonObject;
+        const seed = normalizeSeed(metadata.seed, String(row.id));
+        metadata.seed = seed;
+        this.run("update worlds set seed = ?, metadata_json = ? where id = ?", [seed, JSON.stringify(metadata), String(row.id)]);
+      }
+    }
+    if (!this.hasColumn("experiments", "seed")) {
+      this.exec("alter table experiments add column seed integer not null default 0");
+      for (const row of this.query("select id, world_id, metadata_json from experiments")) {
+        const metadata = JSON.parse(String(row.metadata_json ?? "{}")) as JsonObject;
+        const seed = normalizeSeed(metadata.seed, `${String(row.world_id)}:${String(row.id)}`);
+        metadata.seed = seed;
+        this.run("update experiments set seed = ?, metadata_json = ? where id = ?", [seed, JSON.stringify(metadata), String(row.id)]);
+      }
+    }
   }
 
   private hasColumn(table: string, column: string): boolean {
@@ -970,15 +1021,17 @@ export class Chem0Store {
   private ensureDefaultPhysicalWorld(): void {
     if (this.getWorld(DEFAULT_PHYSICAL_WORLD_ID)) return;
     const created = now();
-    this.run("insert into worlds values (?, ?, ?, ?, ?, ?, ?, ?)", [
+    const seed = normalizeSeed("default physical world", DEFAULT_PHYSICAL_WORLD_ID);
+    this.run("insert into worlds values (?, ?, ?, ?, ?, ?, ?, ?, ?)", [
       DEFAULT_PHYSICAL_WORLD_ID,
       "Default physical world",
       "physical",
       "active",
       null,
+      seed,
       created,
       created,
-      JSON.stringify({ default: true })
+      JSON.stringify({ default: true, seed })
     ]);
   }
 
@@ -989,6 +1042,7 @@ export class Chem0Store {
       type: String(row.type) as WorldType,
       status: String(row.status),
       default_robot_id: row.default_robot_id == null ? null : String(row.default_robot_id),
+      seed: Number(row.seed ?? 0) >>> 0,
       created_at: String(row.created_at),
       updated_at: String(row.updated_at),
       metadata: JSON.parse(String(row.metadata_json)) as JsonObject

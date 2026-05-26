@@ -30,7 +30,7 @@ type ThemeSyncOptions = {
   onSettingsChanged?: (handler: (settings: ShellSettings) => void) => void;
 };
 
-type Chem0ShellApi = {
+type Phys0ShellApi = {
   applyPlatformClass: (platform?: string) => void;
   applyTheme: (theme: ThemeName) => void;
   bindPaneTabs: (options: PaneTabOptions) => PaneTabBinding;
@@ -39,7 +39,7 @@ type Chem0ShellApi = {
 };
 
 interface Window {
-  Chem0Shell: Chem0ShellApi;
+  Phys0Shell: Phys0ShellApi;
 }
 
 function shellAttrValue(element: Element, attr: string): string {
@@ -143,7 +143,7 @@ function shellInstallToolbarTooltips(options: ToolbarTooltipOptions = {}): void 
   options.onSettingsChanged?.(applySettings);
 }
 
-const THEME_STORAGE_KEY = "chem0.theme";
+const THEME_STORAGE_KEY = "phys0.theme";
 
 function shellApplyTheme(theme: ThemeName): void {
   const normalized: ThemeName = theme === "dark" ? "dark" : "light";
@@ -179,7 +179,7 @@ function shellInstallThemeSync(options: ThemeSyncOptions = {}): void {
   }
 })();
 
-window.Chem0Shell = {
+window.Phys0Shell = {
   applyPlatformClass: shellApplyPlatformClass,
   applyTheme: shellApplyTheme,
   bindPaneTabs: shellBindPaneTabs,

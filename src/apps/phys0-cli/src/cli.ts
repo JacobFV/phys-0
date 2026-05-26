@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import path from "node:path";
-import { Chem0Backend, type JsonObject } from "@chem0/backend";
+import { Phys0Backend, type JsonObject } from "@phys0/backend";
 
 type Parsed = {
   positional: string[];
@@ -54,7 +54,7 @@ function parsePose(flags: Parsed["flags"]): JsonObject | undefined {
 async function main(): Promise<void> {
   const parsed = parse(process.argv.slice(2));
   const [scope, action, arg] = parsed.positional;
-  const backend = new Chem0Backend(repoRoot);
+  const backend = new Phys0Backend(repoRoot);
   await backend.init();
   try {
     if (!scope || scope === "help" || parsed.flags.help) {
@@ -64,12 +64,14 @@ async function main(): Promise<void> {
           "phys0 asset validate <asset_id>",
           "phys0 asset import <path> --id <asset_id> [--name <name>] [--kind robot] [--format urdf]",
           "phys0 asset patch <asset_id> --patch '{...}'",
-          "phys0 world create <name> [--type physical|virtual]",
+          "phys0 world create <name> [--type physical|virtual] [--seed <number|string>]",
           "phys0 world spawn-robot <asset_id> --world-id <id> [--backend gazebo] [--controller ros2_control]",
           "phys0 world spawn-object <asset_id> --world-id <id>",
           "phys0 world add-field <kind> --world-id <id> --domain '{...}'",
           "phys0 world add-process <kind> --world-id <id> --inputs a,b --outputs c",
-          "phys0 sim start|step|reset|stop --world-id <id> [--backend gazebo]"
+          "phys0 sim list",
+          "phys0 sim start|pause|resume|step|reset|stop --world-id <id> [--backend gazebo]",
+          "phys0 sim aerial-control <entity_id> --mode takeoff --target-altitude-m 1.2 [--session-id <id>]"
         ]
       });
       return;
@@ -101,7 +103,11 @@ async function main(): Promise<void> {
     }
 
     if (scope === "world" && action === "create") {
-      print(await backend.callTool("create_world", { name: arg ?? "World", type: flagString(parsed.flags, "type") ?? "physical" }));
+      print(await backend.callTool("create_world", json({
+        name: arg ?? "World",
+        type: flagString(parsed.flags, "type") ?? "physical",
+        seed: flagString(parsed.flags, "seed")
+      })));
       return;
     }
     if (scope === "world" && action === "spawn-robot") {
@@ -144,12 +150,29 @@ async function main(): Promise<void> {
       return;
     }
 
-    if (scope === "sim" && ["start", "step", "reset", "stop"].includes(action ?? "")) {
+    if (scope === "sim" && action === "list") {
+      print(await backend.callTool("list_sim_sessions", {}));
+      return;
+    }
+    if (scope === "sim" && action === "aerial-control") {
+      print(await backend.callTool("set_aerial_control", json({
+        entity_id: arg,
+        world_id: flagString(parsed.flags, "worldId"),
+        session_id: flagString(parsed.flags, "sessionId"),
+        mode: flagString(parsed.flags, "mode"),
+        thrust_n: Number(flagString(parsed.flags, "thrustN") ?? "NaN"),
+        target_altitude_m: Number(flagString(parsed.flags, "targetAltitudeM") ?? "NaN"),
+        yaw_rate_rad_s: Number(flagString(parsed.flags, "yawRateRadS") ?? "NaN")
+      })));
+      return;
+    }
+    if (scope === "sim" && ["start", "pause", "resume", "step", "reset", "stop"].includes(action ?? "")) {
       print(await backend.callTool(`${action}_sim`, json({
         world_id: flagString(parsed.flags, "worldId"),
         backend: flagString(parsed.flags, "backend"),
         session_id: flagString(parsed.flags, "sessionId"),
-        dt_s: Number(flagString(parsed.flags, "dtS") ?? "0")
+        dt_s: Number(flagString(parsed.flags, "dtS") ?? "0"),
+        seed: flagString(parsed.flags, "seed")
       })));
       return;
     }

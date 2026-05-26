@@ -1,4 +1,4 @@
-# chem-0 — the video
+# phys-0 — the video
 
 A ~5:55 Remotion film about an experiment that ran out of runway. Light
 parchment palette, serif body, mono accents. Designed for narration recorded
@@ -40,7 +40,7 @@ versions pinned in `package.json` were chosen to avoid that.
 ## Render
 
 ```sh
-npm run build           # mp4 to ./out/chem0.mp4
+npm run build           # mp4 to ./out/phys0.mp4
 npm run still           # poster image at frame 180
 ```
 

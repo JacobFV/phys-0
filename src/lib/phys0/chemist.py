@@ -1,4 +1,4 @@
-"""High-level chemistry experiment actions for chem-0.
+"""High-level chemistry experiment actions for phys-0.
 
 Wraps the MCP tool calls into experiment primitives as defined in
 ``AGENTS.md``:
@@ -11,7 +11,7 @@ Wraps the MCP tool calls into experiment primitives as defined in
   - Dip multimeter probe into solution and read resistance
 
 Usage:
-    from chem0.chemist import (
+    from phys0.chemist import (
         pick_up_vial, infer_vial_ph, infer_identity,
         combine_vials, pick_up_probe, dip_probe_and_read,
     )
@@ -25,7 +25,7 @@ from typing import Any, Callable
 import cv2
 import numpy as np
 
-from chem0.vision import (
+from phys0.vision import (
     VialROI,
     PHResult,
     ProbeROI,
@@ -55,7 +55,7 @@ class RobotAPI:
     with the given arguments and returns the result dict.
 
     Example bridge dispatch:
-        >>> from chem0.core import HANDLERS
+        >>> from phys0.core import HANDLERS
         >>> api = RobotAPI(dispatch=lambda name, **kw: HANDLERS[name](kw))
 
     Example agent dispatch (via JSON-line bridge):
@@ -291,7 +291,7 @@ def dip_probe_and_read(
     if frame is None:
         frame = capture_frame(camera_id)
 
-    from chem0.vision import find_trial_cup
+    from phys0.vision import find_trial_cup
     cup = find_trial_cup(frame)
 
     log: dict[str, Any] = {

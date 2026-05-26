@@ -110,7 +110,7 @@ export class AudioService {
     let filePath = audioPath ? path.resolve(audioPath) : "";
     if (audioBase64) {
       const ext = extensionForMime(mimeType);
-      const scratch = path.join(os.tmpdir(), `chem0-hearing-${Date.now()}.${ext}`);
+      const scratch = path.join(os.tmpdir(), `phys0-hearing-${Date.now()}.${ext}`);
       fs.writeFileSync(scratch, Buffer.from(audioBase64, "base64"));
       filePath = scratch;
     }

@@ -94,7 +94,7 @@ export const SceneAgent: React.FC = () => {
           {/* LHS: shrunken real console */}
           <ElectronFrame
             src="electron/static_index.html"
-            title="chem-0 · exp_a3f9"
+            title="phys-0 · exp_a3f9"
             width={960}
             height={640}
             innerW={1720}

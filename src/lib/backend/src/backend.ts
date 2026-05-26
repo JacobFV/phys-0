@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { Worker } from "node:worker_threads";
 import OpenAI from "openai";
 import { AudioService } from "./audio";
 import { AssetRegistry } from "./assetRegistry";
@@ -20,11 +21,14 @@ import {
   requireStringArray
 } from "./physSchema";
 import { ExternalRuntimeAdapter, LeRobotAdapter, parseRobotCommand, type PhysProtocolAdapter } from "./protocolAdapters";
-import { Chem0Store, DEFAULT_PHYSICAL_WORLD_ID } from "./store";
-import type { AssetFormat, AssetKind, AssetManifest, Experiment, JsonObject, JsonValue, Protocol, RobotEmbodiment, RobotKind, WorldType } from "./types";
+import { poseToJson } from "./rapierPhysics";
+import { Phys0Store, DEFAULT_PHYSICAL_WORLD_ID } from "./store";
+import type { AerialControlCommand } from "./physics";
+import type { AssetFormat, AssetKind, AssetManifest, Experiment, JsonObject, JsonValue, PhysEntity, Protocol, RobotEmbodiment, RobotKind, WorldType } from "./types";
 
 const DEFAULT_MODEL = "gpt-5.5";
 const MAX_AGENT_STEPS = 8;
+const DEFAULT_SIM_WORLD_CAP = 8;
 const ROBOT_TOOL_NAMES = new Set([
   "connect_so101",
   "observe",
@@ -38,21 +42,54 @@ const ROBOT_TOOL_NAMES = new Set([
   "disconnect"
 ]);
 
-export class Chem0Backend extends EventEmitter {
-  readonly store: Chem0Store;
+type SimStatus = "running" | "paused" | "stopped" | "error";
+
+type SimWorkerResponse = {
+  world_id: string;
+  seed: number;
+  fixed_time_step_s: number;
+  elapsed_s: number;
+  step_count: number;
+  snapshot?: {
+    poses?: Record<string, { position: [number, number, number]; orientation: [number, number, number, number] }>;
+    velocities?: Record<string, { linear: [number, number, number]; angular: [number, number, number] }>;
+    contacts?: Array<{ a: string; b: string }>;
+  };
+};
+
+type SimSession = {
+  id: string;
+  worldId: string;
+  backend: string;
+  seed: number;
+  fixedTimeStepS: number;
+  status: SimStatus;
+  worker: Worker;
+  requestId: number;
+  pending: Map<number, { resolve: (value: SimWorkerResponse) => void; reject: (error: Error) => void }>;
+  startedAt: string;
+  updatedAt: string;
+  lastSnapshot: SimWorkerResponse | null;
+};
+
+export class Phys0Backend extends EventEmitter {
+  readonly store: Phys0Store;
   readonly bridge: PythonBridge;
   readonly audio: AudioService;
   readonly assetRegistry: AssetRegistry;
   private readonly adapters: Map<Protocol, PhysProtocolAdapter>;
+  private readonly simSessions = new Map<string, SimSession>();
+  private readonly maxSimWorlds: number;
   private initialized = false;
 
   constructor(readonly repoRoot: string, dataDir = path.join(repoRoot, "data")) {
     super();
     this.loadEnv();
-    this.store = new Chem0Store(repoRoot, dataDir);
+    this.store = new Phys0Store(repoRoot, dataDir);
     this.audio = new AudioService(dataDir);
     this.bridge = new PythonBridge(repoRoot);
     this.assetRegistry = new AssetRegistry(repoRoot);
+    this.maxSimWorlds = Math.max(1, Number(process.env.PHYS0_MAX_SIM_WORLDS ?? DEFAULT_SIM_WORLD_CAP));
     this.adapters = new Map<Protocol, PhysProtocolAdapter>([
       ["lerobot", new LeRobotAdapter((tool, toolArgs) => this.executeTool(tool, toolArgs))],
       ["ros2", new ExternalRuntimeAdapter("ros2", "ros2", ["raw"])],
@@ -99,7 +136,7 @@ export class Chem0Backend extends EventEmitter {
     await this.init();
     if (name === "create_experiment") {
       const worldId = typeof args.world_id === "string" && args.world_id.trim() ? args.world_id : DEFAULT_PHYSICAL_WORLD_ID;
-      return this.createExperiment(String(args.name ?? "Untitled experiment"), (args.metadata as JsonObject) ?? {}, worldId);
+      return this.createExperiment(String(args.name ?? "Untitled experiment"), (args.metadata as JsonObject) ?? {}, worldId, args.seed);
     }
     if (name === "list_experiments") {
       return { experiments: this.store.listExperiments() as unknown as JsonObject[] };
@@ -117,7 +154,8 @@ export class Chem0Backend extends EventEmitter {
         world: this.store.createWorld({
           name: String(args.name ?? ""),
           type: String(args.type ?? "physical") as WorldType,
-          metadata: (args.metadata as JsonObject) ?? {}
+          metadata: (args.metadata as JsonObject) ?? {},
+          seed: args.seed
         }) as unknown as JsonObject
       };
     }
@@ -405,6 +443,14 @@ export class Chem0Backend extends EventEmitter {
     if (name === "list_protocol_adapters") {
       return { adapters: this.protocolAdapters() as unknown as JsonObject[] };
     }
+    if (name === "list_sim_sessions") {
+      return {
+        sessions: Array.from(this.simSessions.values()).map((session) => this.simSessionPayload(session, session.lastSnapshot)) as unknown as JsonObject[]
+      };
+    }
+    if (name === "set_aerial_control") {
+      return this.setAerialControl(args);
+    }
     if (name === "connect_controller") {
       const protocol = requireEnum(args.protocol ?? "none", PROTOCOLS, "protocol");
       const controller = this.store.connectController({
@@ -452,7 +498,7 @@ export class Chem0Backend extends EventEmitter {
       if (adapter) await adapter.disconnect();
       return { controller: this.store.updateControllerStatus(controllerId, "disconnected") as unknown as JsonObject };
     }
-    if (name === "start_sim" || name === "stop_sim" || name === "reset_sim" || name === "step_sim") {
+    if (["start_sim", "pause_sim", "resume_sim", "stop_sim", "reset_sim", "step_sim"].includes(name)) {
       return this.handleSimTool(name, args);
     }
     if (name === "list_experiment_artifacts") {
@@ -517,8 +563,8 @@ export class Chem0Backend extends EventEmitter {
     return result;
   }
 
-  createExperiment(name: string, metadata: JsonObject = {}, worldId = DEFAULT_PHYSICAL_WORLD_ID): JsonObject {
-    const experiment = this.store.createExperiment(name, metadata, worldId);
+  createExperiment(name: string, metadata: JsonObject = {}, worldId = DEFAULT_PHYSICAL_WORLD_ID, seed?: unknown): JsonObject {
+    const experiment = this.store.createExperiment(name, metadata, worldId, seed);
     const session = this.store.createSession(experiment.id, DEFAULT_MODEL);
     this.store.appendEvent({
       experimentId: experiment.id,
@@ -556,7 +602,7 @@ export class Chem0Backend extends EventEmitter {
     try {
       let text = "";
       const instructions =
-        "You are controlling a local LeRobot experiment through chem-0. Your agent session is scoped to one world through the experiment; do not ask the user for world_id or pass world_id to tools unless explicitly changing world management. Use tools when hardware state, camera state, arm motion, or human voice interaction is required. Use speak_to_human to talk out loud. Treat listen_to_human transcripts as human messages. When you observe a universal-indicator color in a camera frame, estimate the pH and call record_ph(value) so the operator's real-time chart updates. Keep motions conservative and prefer known pose-table references.";
+        "You are controlling a local LeRobot experiment through phys-0. Your agent session is scoped to one world through the experiment; do not ask the user for world_id or pass world_id to tools unless explicitly changing world management. Use tools when hardware state, camera state, arm motion, or human voice interaction is required. Use speak_to_human to talk out loud. Treat listen_to_human transcripts as human messages. When you observe a universal-indicator color in a camera frame, estimate the pH and call record_ph(value) so the operator's real-time chart updates. Keep motions conservative and prefer known pose-table references.";
       let nextInput: unknown = this.sessionMessages(input.experimentId, sessionId);
       let previousResponseId: string | undefined;
       const tools = await this.openAiTools();
@@ -665,6 +711,10 @@ export class Chem0Backend extends EventEmitter {
   }
 
   stop(): void {
+    for (const session of this.simSessions.values()) {
+      void session.worker.terminate();
+    }
+    this.simSessions.clear();
     this.bridge.stop();
   }
 
@@ -822,6 +872,7 @@ export class Chem0Backend extends EventEmitter {
       id: world.id,
       name: world.name,
       kind: world.type === "virtual" ? "simulated" : "physical",
+      seed: world.seed,
       regimes,
       frameConvention: typeof world.metadata.frameConvention === "string" ? world.metadata.frameConvention : "ros_enu",
       entities: entities as unknown as JsonObject[],
@@ -841,12 +892,24 @@ export class Chem0Backend extends EventEmitter {
   }
 
   private async dispatchCommand(entityId: string, command: ReturnType<typeof parseRobotCommand>): Promise<unknown> {
+    const simResult = await this.dispatchAerialCommandToSim(entityId, command);
+    if (simResult) return simResult;
     const controllers = this.store.listEntityControllers(entityId);
     const protocol = controllers[0]?.protocol ?? (this.store.getWorldEntity(entityId)?.state.controller as Protocol | undefined) ?? "none";
     const adapter = this.adapters.get(protocol);
     if (!adapter) throw new Error(`No adapter registered for protocol: ${protocol}`);
     if (!adapter.supports(command.type)) throw new Error(`${protocol} adapter does not support command ${command.type}.`);
     return adapter.command(entityId, command);
+  }
+
+  private async dispatchAerialCommandToSim(entityId: string, command: ReturnType<typeof parseRobotCommand>): Promise<unknown | null> {
+    const control = this.aerialControlFromCommand(command);
+    if (!control) return null;
+    const entity = this.store.getWorldEntity(entityId);
+    if (!entity) throw new Error(`Unknown entity_id: ${entityId}`);
+    const session = Array.from(this.simSessions.values()).find((item) => item.worldId === entity.world_id && item.status === "running");
+    if (!session) return null;
+    return this.sendSimAerialControl(session, entityId, control);
   }
 
   private async readAdapterState(entityId: string): Promise<JsonValue> {
@@ -861,26 +924,300 @@ export class Chem0Backend extends EventEmitter {
   }
 
   private async handleSimTool(name: string, args: JsonObject): Promise<JsonObject> {
+    if (name === "start_sim") return this.startSim(args);
+    if (name === "pause_sim") return this.pauseSim(args);
+    if (name === "resume_sim") return this.resumeSim(args);
+    if (name === "step_sim") return this.stepSim(args);
+    if (name === "reset_sim") return this.resetSim(args);
+    if (name === "stop_sim") return this.stopSim(args);
+    throw new Error(`Unknown simulation tool: ${name}`);
+  }
+
+  private async startSim(args: JsonObject): Promise<JsonObject> {
+    const worldId = this.requiredWorldId(args);
+    const world = this.store.getWorld(worldId);
+    if (!world) throw new Error(`Unknown world_id: ${worldId}`);
     const backend = optionalEnum(args.backend, PHYS_BACKENDS, "sim backend") ?? "custom";
-    const sessionId = typeof args.session_id === "string" && args.session_id.trim() ? args.session_id : `sim_${backend}_${Date.now().toString(36)}`;
-    const payload = {
-      session_id: sessionId,
+    const sessionId = typeof args.session_id === "string" && args.session_id.trim() ? args.session_id : `sim_${worldId}`;
+    const existing = this.simSessions.get(sessionId);
+    if (existing && existing.status !== "stopped") throw new Error(`Simulation session already exists: ${sessionId}`);
+    this.enforceSimWorldCap(worldId);
+    const fixedTimeStepS = Number(args.dt_s ?? args.fixed_time_step_s ?? 1 / 60);
+    const session = this.createSimSession({
+      id: sessionId,
+      worldId,
       backend,
-      world_id: typeof args.world_id === "string" ? args.world_id : null,
-      status: name === "start_sim" ? "started" : name === "stop_sim" ? "stopped" : name === "reset_sim" ? "reset" : "stepped",
-      step_dt_s: typeof args.dt_s === "number" ? args.dt_s : null,
-      note: "Simulation lifecycle is recorded in phys-0; backend-specific process launch is delegated to the selected runtime adapter."
-    };
-    if (payload.world_id) {
-      this.store.recordIntervention({
-        worldId: payload.world_id,
-        targetIds: [],
-        kind: "environment_change",
-        payload: payload as unknown as JsonValue,
-        metadata: { tool: name }
+      seed: Number(args.seed ?? world.seed),
+      fixedTimeStepS: Number.isFinite(fixedTimeStepS) && fixedTimeStepS > 0 ? fixedTimeStepS : 1 / 60
+    });
+    this.simSessions.set(session.id, session);
+    const result = await this.sendSimRequest(session, {
+      op: "init",
+      worldId,
+      seed: session.seed,
+      fixedTimeStepS: session.fixedTimeStepS,
+      entities: this.store.listWorldEntities(worldId)
+    });
+    session.lastSnapshot = result;
+    this.recordSimLifecycle(worldId, "start_sim", session, result);
+    return this.simSessionPayload(session, result);
+  }
+
+  private async setAerialControl(args: JsonObject): Promise<JsonObject> {
+    const entityId = String(args.entity_id ?? "").trim();
+    if (!entityId) throw new Error("set_aerial_control requires entity_id.");
+    const entity = this.store.getWorldEntity(entityId);
+    if (!entity) throw new Error(`Unknown entity_id: ${entityId}`);
+    const session = this.resolveSimSession({ ...args, world_id: args.world_id ?? entity.world_id });
+    if (session.status !== "running") throw new Error(`Simulation session is not running: ${session.id}`);
+    const control = this.aerialControlFromArgs(args);
+    const result = await this.sendSimAerialControl(session, entityId, control);
+    const intervention = this.store.recordIntervention({
+      worldId: entity.world_id,
+      targetIds: [entity.id],
+      kind: "robot_command",
+      payload: control as unknown as JsonValue,
+      metadata: { tool: "set_aerial_control", simulator: "rapier" }
+    });
+    return { ...result, intervention: intervention as unknown as JsonObject };
+  }
+
+  private async stepSim(args: JsonObject): Promise<JsonObject> {
+    const session = this.resolveSimSession(args);
+    if (session.status !== "running") throw new Error(`Simulation session is not running: ${session.id}`);
+    const dtS = Number(args.dt_s ?? session.fixedTimeStepS);
+    const result = await this.sendSimRequest(session, { op: "step", dtS: Number.isFinite(dtS) && dtS > 0 ? dtS : session.fixedTimeStepS });
+    session.lastSnapshot = result;
+    session.updatedAt = new Date().toISOString();
+    this.applySimSnapshot(session.worldId, result);
+    this.recordSimLifecycle(session.worldId, "step_sim", session, result);
+    return this.simSessionPayload(session, result);
+  }
+
+  private async pauseSim(args: JsonObject): Promise<JsonObject> {
+    const session = this.resolveSimSession(args);
+    if (session.status !== "running") throw new Error(`Simulation session is not running: ${session.id}`);
+    const snapshot = await this.sendSimRequest(session, { op: "snapshot" });
+    session.status = "paused";
+    session.updatedAt = new Date().toISOString();
+    session.lastSnapshot = snapshot;
+    this.recordSimLifecycle(session.worldId, "pause_sim", session, snapshot);
+    return this.simSessionPayload(session, snapshot);
+  }
+
+  private async sendSimAerialControl(session: SimSession, entityId: string, control: AerialControlCommand): Promise<JsonObject> {
+    const result = await this.sendSimRequest(session, { op: "control", entityId, control });
+    session.lastSnapshot = result;
+    session.updatedAt = new Date().toISOString();
+    const entity = this.store.getWorldEntity(entityId);
+    if (entity) {
+      this.store.updateWorldEntity({
+        entityId,
+        state: { ...entity.state, aerial_control: control as unknown as JsonValue, sim: { seed: result.seed, step_count: result.step_count, elapsed_s: result.elapsed_s } }
       });
     }
-    return payload as unknown as JsonObject;
+    return this.simSessionPayload(session, result);
+  }
+
+  private aerialControlFromCommand(command: ReturnType<typeof parseRobotCommand>): AerialControlCommand | null {
+    if (command.type === "mavlink_takeoff") return { mode: "takeoff", targetAltitudeM: command.altitudeM };
+    if (command.type === "mavlink_land") return { mode: "land", targetAltitudeM: 0.06 };
+    if (command.type === "mavlink_goto") {
+      const local = command.localPose && typeof command.localPose === "object" && !Array.isArray(command.localPose) ? command.localPose : {};
+      return {
+        mode: "goto",
+        targetAltitudeM: Number(command.alt ?? local.z ?? 1),
+        targetPosition: [Number(local.x ?? 0), Number(local.y ?? 0), Number(command.alt ?? local.z ?? 1)]
+      };
+    }
+    if (command.type === "aerial_control") {
+      return {
+        mode: command.mode,
+        thrustN: command.thrustN,
+        targetAltitudeM: command.targetAltitudeM,
+        targetPosition: command.targetPosition,
+        yawRateRadS: command.yawRateRadS
+      };
+    }
+    return null;
+  }
+
+  private aerialControlFromArgs(args: JsonObject): AerialControlCommand {
+    const mode = String(args.mode ?? "hover") as AerialControlCommand["mode"];
+    if (!["idle", "thrust", "hover", "takeoff", "land", "goto"].includes(mode)) throw new Error("Invalid aerial control mode.");
+    const targetPosition = Array.isArray(args.target_position)
+      ? [Number(args.target_position[0] ?? 0), Number(args.target_position[1] ?? 0), Number(args.target_position[2] ?? 0)] as [number, number, number]
+      : undefined;
+    return {
+      mode,
+      thrustN: numberArg(args.thrust_n),
+      targetAltitudeM: numberArg(args.target_altitude_m),
+      targetPosition,
+      yawRateRadS: numberArg(args.yaw_rate_rad_s),
+      torqueNm: Array.isArray(args.torque_nm)
+        ? [Number(args.torque_nm[0] ?? 0), Number(args.torque_nm[1] ?? 0), Number(args.torque_nm[2] ?? 0)]
+        : undefined
+    };
+  }
+
+  private async resumeSim(args: JsonObject): Promise<JsonObject> {
+    const sessionId = typeof args.session_id === "string" && args.session_id.trim() ? args.session_id : "";
+    const session = sessionId
+      ? this.simSessions.get(sessionId)
+      : Array.from(this.simSessions.values()).find((item) => item.worldId === this.requiredWorldId(args) && item.status === "paused");
+    if (!session) throw new Error("Unknown paused simulation session.");
+    if (session.status !== "paused") throw new Error(`Simulation session is not paused: ${session.id}`);
+    const snapshot = await this.sendSimRequest(session, { op: "snapshot" });
+    session.status = "running";
+    session.updatedAt = new Date().toISOString();
+    session.lastSnapshot = snapshot;
+    this.recordSimLifecycle(session.worldId, "resume_sim", session, snapshot);
+    return this.simSessionPayload(session, snapshot);
+  }
+
+  private async resetSim(args: JsonObject): Promise<JsonObject> {
+    const session = this.resolveSimSession(args);
+    const world = this.store.getWorld(session.worldId);
+    const seed = Number(args.seed ?? world?.seed ?? session.seed);
+    const result = await this.sendSimRequest(session, {
+      op: "reset",
+      seed,
+      entities: this.store.listWorldEntities(session.worldId)
+    });
+    session.seed = result.seed;
+    session.status = "running";
+    session.updatedAt = new Date().toISOString();
+    session.lastSnapshot = result;
+    this.applySimSnapshot(session.worldId, result);
+    this.recordSimLifecycle(session.worldId, "reset_sim", session, result);
+    return this.simSessionPayload(session, result);
+  }
+
+  private async stopSim(args: JsonObject): Promise<JsonObject> {
+    const session = this.resolveSimSession(args);
+    const snapshot = await this.sendSimRequest(session, { op: "snapshot" }).catch(() => session.lastSnapshot);
+    await this.sendSimRequest(session, { op: "destroy" }).catch(() => null);
+    await session.worker.terminate();
+    session.status = "stopped";
+    session.updatedAt = new Date().toISOString();
+    this.simSessions.delete(session.id);
+    if (snapshot) this.recordSimLifecycle(session.worldId, "stop_sim", session, snapshot);
+    return this.simSessionPayload(session, snapshot ?? session.lastSnapshot);
+  }
+
+  private createSimSession(input: { id: string; worldId: string; backend: string; seed: number; fixedTimeStepS: number }): SimSession {
+    const worker = new Worker(path.join(__dirname, "simWorker.js"));
+    const pending = new Map<number, { resolve: (value: SimWorkerResponse) => void; reject: (error: Error) => void }>();
+    const session: SimSession = {
+      id: input.id,
+      worldId: input.worldId,
+      backend: input.backend,
+      seed: input.seed,
+      fixedTimeStepS: input.fixedTimeStepS,
+      status: "running",
+      worker,
+      requestId: 0,
+      pending,
+      startedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      lastSnapshot: null
+    };
+    worker.on("message", (message: { id?: number; ok?: boolean; result?: SimWorkerResponse; error?: string }) => {
+      const id = Number(message.id);
+      const waiter = pending.get(id);
+      if (!waiter) return;
+      pending.delete(id);
+      if (message.ok) waiter.resolve(message.result as SimWorkerResponse);
+      else waiter.reject(new Error(message.error ?? "Simulation worker request failed."));
+    });
+    worker.on("error", (error) => {
+      session.status = "error";
+      for (const [, waiter] of pending) waiter.reject(error);
+      pending.clear();
+    });
+    return session;
+  }
+
+  private sendSimRequest(session: SimSession, payload: Record<string, unknown>): Promise<SimWorkerResponse> {
+    const id = ++session.requestId;
+    return new Promise((resolve, reject) => {
+      session.pending.set(id, { resolve, reject });
+      session.worker.postMessage({ id, ...payload });
+    });
+  }
+
+  private applySimSnapshot(worldId: string, result: SimWorkerResponse): void {
+    const poses = result.snapshot?.poses ?? {};
+    for (const [entityId, pose] of Object.entries(poses).sort(([a], [b]) => a.localeCompare(b))) {
+      const entity = this.store.getWorldEntity(entityId);
+      if (!entity || entity.world_id !== worldId) continue;
+      this.store.updateWorldEntity({
+        entityId,
+        pose: poseToJson(pose),
+        state: { ...entity.state, sim: { seed: result.seed, step_count: result.step_count, elapsed_s: result.elapsed_s } }
+      });
+    }
+    if ((result.snapshot?.contacts ?? []).length > 0) {
+      this.store.recordObservation({
+        worldId,
+        sourceId: "simulation",
+        kind: "state_estimate",
+        value: { contacts: result.snapshot?.contacts ?? [], step_count: result.step_count } as JsonValue,
+        metadata: { simulator: "rapier" }
+      });
+    }
+  }
+
+  private recordSimLifecycle(worldId: string, tool: string, session: SimSession, result: SimWorkerResponse): void {
+    this.store.recordIntervention({
+      worldId,
+      targetIds: [],
+      kind: "environment_change",
+      payload: this.simSessionPayload(session, result) as unknown as JsonValue,
+      metadata: { tool, simulator: "rapier" }
+    });
+  }
+
+  private simSessionPayload(session: SimSession, result: SimWorkerResponse | null): JsonObject {
+    return {
+      session_id: session.id,
+      world_id: session.worldId,
+      backend: session.backend,
+      status: session.status,
+      seed: result?.seed ?? session.seed,
+      fixed_time_step_s: result?.fixed_time_step_s ?? session.fixedTimeStepS,
+      elapsed_s: result?.elapsed_s ?? session.lastSnapshot?.elapsed_s ?? 0,
+      step_count: result?.step_count ?? session.lastSnapshot?.step_count ?? 0,
+      snapshot: (result?.snapshot ?? session.lastSnapshot?.snapshot ?? {}) as unknown as JsonObject,
+      worker: { mode: "worker_thread", max_worlds: this.maxSimWorlds },
+      started_at: session.startedAt,
+      updated_at: session.updatedAt
+    };
+  }
+
+  private resolveSimSession(args: JsonObject): SimSession {
+    const sessionId = typeof args.session_id === "string" && args.session_id.trim() ? args.session_id : "";
+    if (sessionId) {
+      const session = this.simSessions.get(sessionId);
+      if (!session) throw new Error(`Unknown simulation session: ${sessionId}`);
+      return session;
+    }
+    const worldId = this.requiredWorldId(args);
+    const sessions = Array.from(this.simSessions.values()).filter((session) => session.worldId === worldId && session.status !== "stopped");
+    if (sessions.length !== 1) throw new Error(`Expected exactly one simulation session for world_id ${worldId}; found ${sessions.length}.`);
+    return sessions[0];
+  }
+
+  private requiredWorldId(args: JsonObject): string {
+    const worldId = typeof args.world_id === "string" && args.world_id.trim() ? args.world_id : "";
+    if (!worldId) throw new Error("Simulation tool requires world_id.");
+    return worldId;
+  }
+
+  private enforceSimWorldCap(nextWorldId: string): void {
+    const activeWorlds = new Set(Array.from(this.simSessions.values()).filter((session) => session.status === "running").map((session) => session.worldId));
+    activeWorlds.add(nextWorldId);
+    if (activeWorlds.size > this.maxSimWorlds) throw new Error(`Concurrent simulated world cap exceeded: ${activeWorlds.size}/${this.maxSimWorlds}.`);
   }
 
   private backendTools(): JsonObject[] {
@@ -1338,37 +1675,92 @@ export class Chem0Backend extends EventEmitter {
       },
       {
         name: "start_sim",
-        description: "Start or record a simulation session for a world/backend pair.",
+        description: "Start a deterministic worker-thread simulation session for a world/backend pair.",
         inputSchema: {
           type: "object",
-          properties: { world_id: { type: "string" }, backend: { type: "string" }, session_id: { type: "string" } },
+          properties: {
+            world_id: { type: "string" },
+            backend: { type: "string" },
+            session_id: { type: "string" },
+            seed: { type: ["number", "string"] },
+            dt_s: { type: "number" },
+            fixed_time_step_s: { type: "number" }
+          },
+          required: ["world_id"],
           additionalProperties: false
         }
       },
       {
         name: "stop_sim",
-        description: "Stop or record stopping a simulation session.",
+        description: "Stop a running simulation session and terminate its worker.",
         inputSchema: {
           type: "object",
           properties: { world_id: { type: "string" }, backend: { type: "string" }, session_id: { type: "string" } },
+          additionalProperties: false
+        }
+      },
+      {
+        name: "pause_sim",
+        description: "Pause a running simulation session without terminating its worker.",
+        inputSchema: {
+          type: "object",
+          properties: { world_id: { type: "string" }, session_id: { type: "string" } },
+          additionalProperties: false
+        }
+      },
+      {
+        name: "resume_sim",
+        description: "Resume a paused simulation session.",
+        inputSchema: {
+          type: "object",
+          properties: { world_id: { type: "string" }, session_id: { type: "string" } },
           additionalProperties: false
         }
       },
       {
         name: "reset_sim",
-        description: "Reset or record resetting a simulation session.",
+        description: "Reset a running simulation session from current world entities.",
         inputSchema: {
           type: "object",
-          properties: { world_id: { type: "string" }, backend: { type: "string" }, session_id: { type: "string" } },
+          properties: { world_id: { type: "string" }, backend: { type: "string" }, session_id: { type: "string" }, seed: { type: ["number", "string"] } },
           additionalProperties: false
         }
       },
       {
         name: "step_sim",
-        description: "Step or record stepping a simulation session.",
+        description: "Step a running deterministic simulation session and sync poses into world_entities.",
         inputSchema: {
           type: "object",
           properties: { world_id: { type: "string" }, backend: { type: "string" }, session_id: { type: "string" }, dt_s: { type: "number" } },
+          additionalProperties: false
+        }
+      },
+      {
+        name: "list_sim_sessions",
+        description: "List active in-process simulation sessions and their latest snapshots.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+          additionalProperties: false
+        }
+      },
+      {
+        name: "set_aerial_control",
+        description: "Set force-based aerial control for a simulated drone entity in a running simulation session.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            entity_id: { type: "string" },
+            world_id: { type: "string" },
+            session_id: { type: "string" },
+            mode: { type: "string", enum: ["idle", "thrust", "hover", "takeoff", "land", "goto"] },
+            thrust_n: { type: "number" },
+            target_altitude_m: { type: "number" },
+            target_position: { type: "array", items: { type: "number" }, minItems: 3, maxItems: 3 },
+            yaw_rate_rad_s: { type: "number" },
+            torque_nm: { type: "array", items: { type: "number" }, minItems: 3, maxItems: 3 }
+          },
+          required: ["entity_id", "mode"],
           additionalProperties: false
         }
       },
@@ -1517,4 +1909,9 @@ export class Chem0Backend extends EventEmitter {
     }
     return {};
   }
+}
+
+function numberArg(value: unknown): number | undefined {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }

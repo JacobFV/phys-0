@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Chem-0 Virtual World</title>
+    <title>Phys-0 Virtual World</title>
     <link rel="stylesheet" href="./styles.css" />
     <link rel="stylesheet" href="./virtual-world.css" />
   </head>
@@ -94,6 +94,10 @@
                   <label for="vw-world-name">Name</label>
                   <input id="vw-world-name" />
                 </div>
+                <div class="vw-field">
+                  <label for="vw-world-seed">Seed</label>
+                  <input id="vw-world-seed" inputmode="numeric" />
+                </div>
                 <button id="vw-save-world" class="primary">Save world</button>
               </section>
             </div>
@@ -150,7 +154,8 @@
     <script type="importmap">
       {
         "imports": {
-          "three": "./vendor/three.module.js"
+          "three": "./vendor/three.module.js",
+          "@dimforge/rapier3d-compat": "./vendor/rapier3d-compat.mjs"
         }
       }
     </script>

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Core robot, camera, kinematics, and tool implementation for chem-0."""
+"""Core robot, camera, kinematics, and tool implementation for phys-0."""
 
 from __future__ import annotations
 

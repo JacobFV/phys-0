@@ -15,6 +15,7 @@ export type RobotCommand =
   | { type: "mavlink_takeoff"; altitudeM: number }
   | { type: "mavlink_land" }
   | { type: "mavlink_goto"; lat?: number; lon?: number; alt?: number; localPose?: JsonObject }
+  | { type: "aerial_control"; mode: "idle" | "thrust" | "hover" | "takeoff" | "land" | "goto"; thrustN?: number; targetAltitudeM?: number; targetPosition?: [number, number, number]; yawRateRadS?: number }
   | { type: "raw"; payload: unknown };
 
 export interface PhysProtocolAdapter {
