@@ -5,7 +5,7 @@ export {};
 
 declare global {
   interface Window {
-    chem0: {
+    phys0: {
       listTools: () => Promise<JsonObject>;
       readResource: (uri: string) => Promise<JsonObject>;
       readUrdf: () => Promise<JsonObject>;
@@ -33,7 +33,7 @@ declare global {
   }
 }
 
-window.Chem0Shell.applyPlatformClass(window.chem0?.platform);
+window.Phys0Shell.applyPlatformClass(window.phys0?.platform);
 
 const output = document.querySelector<HTMLPreElement>("#output")!;
 const experimentSelect = document.querySelector<HTMLSelectElement>("#experiment")!;
@@ -104,7 +104,7 @@ let activeBrowserCameraIds = new Set<number>();
 const virtualCameraCells = new Map<string, HTMLElement>();
 const worldPreviewLastDraw = new Map<string, number>();
 let physicalCameraWorldAssignments: Record<string, string> = JSON.parse(
-  localStorage.getItem("chem0:physical-camera-worlds") ?? "{}"
+  localStorage.getItem("phys0:physical-camera-worlds") ?? "{}"
 ) as Record<string, string>;
 
 let experimentId = "";
@@ -168,7 +168,7 @@ function setActiveWorldLabel(): void {
   worldPickerButton.classList.toggle("active", Boolean(world));
   document.body.dataset.worldId = selectedWorldId;
   document.body.dataset.worldType = type;
-  window.dispatchEvent(new CustomEvent("chem0:world-selected", { detail: { worldId: selectedWorldId, worldType: type } }));
+  window.dispatchEvent(new CustomEvent("phys0:world-selected", { detail: { worldId: selectedWorldId, worldType: type } }));
 }
 
 function show(value: unknown): void {
@@ -262,7 +262,7 @@ const metricLogs: MetricLogEntry[] = [];
 
 let pinnedMetrics: Set<string>;
 try {
-  const stored = localStorage.getItem("chem0:pinned-metrics");
+  const stored = localStorage.getItem("phys0:pinned-metrics");
   const parsed = stored ? (JSON.parse(stored) as unknown) : null;
   pinnedMetrics = new Set(Array.isArray(parsed) ? parsed.map(String) : ["pH"]);
 } catch {
@@ -271,7 +271,7 @@ try {
 
 function savePinnedMetrics(): void {
   try {
-    localStorage.setItem("chem0:pinned-metrics", JSON.stringify([...pinnedMetrics]));
+    localStorage.setItem("phys0:pinned-metrics", JSON.stringify([...pinnedMetrics]));
   } catch { /* ignore */ }
 }
 
@@ -858,7 +858,7 @@ function worldEntities(worldId: string): JsonObject[] {
 }
 
 function savePhysicalCameraAssignments(): void {
-  localStorage.setItem("chem0:physical-camera-worlds", JSON.stringify(physicalCameraWorldAssignments));
+  localStorage.setItem("phys0:physical-camera-worlds", JSON.stringify(physicalCameraWorldAssignments));
 }
 
 function worldType(worldId: string): string {
@@ -1061,7 +1061,7 @@ function renderWorldsList(): void {
       configText.textContent = "Configure";
       configText.addEventListener("click", async (event) => {
         event.stopPropagation();
-        show(await window.chem0.openVirtualWorldWindow(id));
+        show(await window.phys0.openVirtualWorldWindow(id));
       });
       orb.append(configText);
     }
@@ -1096,7 +1096,7 @@ function renderWorldsList(): void {
       });
       if (!confirmed) return;
       try {
-        show(await window.chem0.callTool("delete_world", { world_id: id }));
+        show(await window.phys0.callTool("delete_world", { world_id: id }));
         selectedWorldId = "world_physical_default";
         await refreshWorlds();
         void refreshRobots();
@@ -1155,8 +1155,8 @@ function renderAssetsList(): void {
       const assetId = String(asset.id ?? "");
       try {
         const [manifestResult, validationResult] = await Promise.all([
-          window.chem0.callTool("get_asset_manifest", { asset_id: assetId }),
-          window.chem0.callTool("validate_asset", { asset_id: assetId })
+          window.phys0.callTool("get_asset_manifest", { asset_id: assetId }),
+          window.phys0.callTool("validate_asset", { asset_id: assetId })
         ]);
         show({ ...manifestResult, ...validationResult });
       } catch (error) {
@@ -1168,7 +1168,7 @@ function renderAssetsList(): void {
 }
 
 async function refreshAssets(): Promise<void> {
-  const result = await window.chem0.callTool("list_asset_catalog", {});
+  const result = await window.phys0.callTool("list_asset_catalog", {});
   assetsCache = (result.assets ?? []) as JsonObject[];
   renderAssetsList();
 }
@@ -1178,8 +1178,8 @@ async function renderProcessGraph(): Promise<void> {
   if (!selectedWorldId) return;
   try {
     const [exported, history] = await Promise.all([
-      window.chem0.callTool("export_world", { world_id: selectedWorldId }),
-      window.chem0.callTool("query_history", { world_id: selectedWorldId, limit: 12 })
+      window.phys0.callTool("export_world", { world_id: selectedWorldId }),
+      window.phys0.callTool("query_history", { world_id: selectedWorldId, limit: 12 })
     ]);
     const world = (exported.world ?? {}) as JsonObject;
     const groups: Array<[string, JsonObject[]]> = [
@@ -1227,7 +1227,7 @@ function startWorldInlineEdit(header: HTMLDivElement, title: HTMLDivElement, wor
   save.addEventListener("click", async (event) => {
     event.stopPropagation();
     const name = input.value.trim() || String(world.name ?? id);
-    show(await window.chem0.callTool("update_world", { world_id: id, name, metadata: (world.metadata as JsonObject) ?? {} }));
+    show(await window.phys0.callTool("update_world", { world_id: id, name, metadata: (world.metadata as JsonObject) ?? {} }));
     await refreshWorlds();
   });
   actions.append(save);
@@ -1241,7 +1241,7 @@ function startWorldInlineEdit(header: HTMLDivElement, title: HTMLDivElement, wor
 }
 
 async function refreshWorlds(): Promise<void> {
-  const result = await window.chem0.callTool("list_worlds", {});
+  const result = await window.phys0.callTool("list_worlds", {});
   worldsCache = (result.worlds ?? []) as JsonObject[];
   assignmentsCache = (result.assignments ?? []) as JsonObject[];
   virtualEntitiesCache = (result.virtual_entities ?? []) as JsonObject[];
@@ -1271,12 +1271,12 @@ function updateNotesPane(): void {
     ? JSON.stringify(experiment, null, 2)
     : `id: ${experimentId}`;
   experimentNotes.disabled = false;
-  experimentNotes.value = localStorage.getItem(`chem0:notes:${experimentId}`) ?? "";
+  experimentNotes.value = localStorage.getItem(`phys0:notes:${experimentId}`) ?? "";
 }
 
 experimentNotes.addEventListener("input", () => {
   if (!experimentId) return;
-  localStorage.setItem(`chem0:notes:${experimentId}`, experimentNotes.value);
+  localStorage.setItem(`phys0:notes:${experimentId}`, experimentNotes.value);
 });
 
 async function clearActiveExperiment(): Promise<void> {
@@ -1325,7 +1325,7 @@ async function selectWorld(id: string, options: { matchExperiment?: boolean } = 
 
 async function createExperimentFromCurrentWorld(): Promise<void> {
   try {
-    const result = await window.chem0.createExperiment(
+    const result = await window.phys0.createExperiment(
       experimentName.value.trim() || "Untitled experiment",
       { app: "electron" },
       selectedWorldId
@@ -1343,7 +1343,7 @@ async function createExperimentFromCurrentWorld(): Promise<void> {
 }
 
 async function refreshExperiments(): Promise<void> {
-  const result = await window.chem0.listExperiments();
+  const result = await window.phys0.listExperiments();
   const experiments = (result.experiments ?? []) as JsonObject[];
   experimentsCache = experiments;
   experimentSelect.replaceChildren();
@@ -1370,7 +1370,7 @@ async function refreshArtifacts(): Promise<void> {
     return;
   }
   try {
-    const result = await window.chem0.listArtifacts(experimentId);
+    const result = await window.phys0.listArtifacts(experimentId);
     const artifacts = (result.artifacts ?? []) as JsonObject[];
     if (artifacts.length === 0) {
       const empty = document.createElement("li");
@@ -1411,7 +1411,7 @@ function textFromTool(result: JsonObject): string {
 async function refreshRobots(): Promise<void> {
   robotsList.replaceChildren();
   try {
-    const result = await window.chem0.callTool("list_connected_robots", { max_id: 12 });
+    const result = await window.phys0.callTool("list_connected_robots", { max_id: 12 });
     await refreshWorlds();
     let parsed: JsonObject = {};
     try { parsed = JSON.parse(textFromTool(result)) as JsonObject; } catch { parsed = result; }
@@ -1478,7 +1478,7 @@ async function assignRobotToSelectedWorld(robot: JsonObject, makeDefault: boolea
   const robotId = String(robot.suggested_robot_id ?? robot.robot_id ?? defaultRobotInput.value).trim();
   if (!robotId) return;
   try {
-    const result = await window.chem0.callTool("assign_robot_to_world", {
+    const result = await window.phys0.callTool("assign_robot_to_world", {
       robot_id: robotId,
       world_id: selectedWorldId,
       robot_kind: "physical",
@@ -1500,14 +1500,14 @@ async function assignRobotToSelectedWorld(robot: JsonObject, makeDefault: boolea
 async function applyDefaultRobot(robotId: string): Promise<void> {
   const world = selectedWorld();
   const worldType = String(world?.type ?? "physical");
-  await window.chem0.callTool("assign_robot_to_world", {
+  await window.phys0.callTool("assign_robot_to_world", {
     robot_id: robotId,
     world_id: selectedWorldId,
     robot_kind: worldType === "virtual" ? "virtual" : "physical",
     make_default: true,
     metadata: { source: "manual" }
   });
-  const result = await window.chem0.callTool("set_default_robot", { robot_id: robotId, world_id: selectedWorldId });
+  const result = await window.phys0.callTool("set_default_robot", { robot_id: robotId, world_id: selectedWorldId });
   defaultRobotId = String(result.robot_id ?? robotId);
   defaultRobotInput.value = defaultRobotId;
   show(result);
@@ -1520,7 +1520,7 @@ async function createVirtualArm(): Promise<void> {
     show("Select a virtual world before creating a virtual arm.");
     return;
   }
-  const result = await window.chem0.callTool("create_virtual_arm", {
+  const result = await window.phys0.callTool("create_virtual_arm", {
     world_id: selectedWorldId,
     name: virtualArmNameInput.value.trim() || "Virtual SO-101",
     make_default: true,
@@ -1691,13 +1691,13 @@ function templateEntities(template: VirtualTemplate): TemplateEntity[] {
 async function instantiateTemplate(worldId: string, template: VirtualTemplate): Promise<void> {
   for (const entity of templateEntities(template)) {
     if (entity.tool === "arm") {
-      await window.chem0.callTool("create_virtual_arm", { world_id: worldId, name: entity.name, pose: entity.pose, make_default: entity.make_default === true, spec: entity.spec ?? {} });
+      await window.phys0.callTool("create_virtual_arm", { world_id: worldId, name: entity.name, pose: entity.pose, make_default: entity.make_default === true, spec: entity.spec ?? {} });
     } else if (entity.tool === "camera") {
-      await window.chem0.callTool("create_virtual_camera", { world_id: worldId, name: entity.name, pose: entity.pose, spec: entity.spec ?? {} });
+      await window.phys0.callTool("create_virtual_camera", { world_id: worldId, name: entity.name, pose: entity.pose, spec: entity.spec ?? {} });
     } else if (entity.tool === "light") {
-      await window.chem0.callTool("create_virtual_light", { world_id: worldId, name: entity.name, pose: entity.pose, spec: entity.spec ?? {} });
+      await window.phys0.callTool("create_virtual_light", { world_id: worldId, name: entity.name, pose: entity.pose, spec: entity.spec ?? {} });
     } else {
-      await window.chem0.callTool("create_virtual_rigid_body", { world_id: worldId, name: entity.name, pose: entity.pose, spec: entity.spec });
+      await window.phys0.callTool("create_virtual_rigid_body", { world_id: worldId, name: entity.name, pose: entity.pose, spec: entity.spec });
     }
   }
 }
@@ -1715,7 +1715,7 @@ async function submitWorldModal(): Promise<void> {
     const templateMeta = worldModalType === "virtual" && worldModalTemplate !== "empty"
       ? { ...metadata, template: worldModalTemplate }
       : metadata;
-    const result = await window.chem0.callTool("create_world", { name, type: worldModalType, metadata: templateMeta });
+    const result = await window.phys0.callTool("create_world", { name, type: worldModalType, metadata: templateMeta });
     const world = result.world as JsonObject | undefined;
     if (world?.id) selectedWorldId = String(world.id);
     show(result);
@@ -1723,7 +1723,7 @@ async function submitWorldModal(): Promise<void> {
       await instantiateTemplate(String(world.id), worldModalTemplate);
     }
   } else {
-    const result = await window.chem0.callTool("update_world", { world_id: worldModalWorldId, name, metadata });
+    const result = await window.phys0.callTool("update_world", { world_id: worldModalWorldId, name, metadata });
     show(result);
   }
   closeWorldModal();
@@ -1737,13 +1737,13 @@ async function loadEvents(): Promise<void> {
     scheduleMetricRender(true);
     return;
   }
-  const result = await window.chem0.listEvents(experimentId);
+  const result = await window.phys0.listEvents(experimentId);
   renderEvents((result.events ?? []) as JsonObject[]);
   show(result);
 }
 
 async function call(name: string, args: JsonObject = {}): Promise<JsonObject> {
-  const result = await window.chem0.callTool(name, withExperiment(args));
+  const result = await window.phys0.callTool(name, withExperiment(args));
   show(result);
   return result;
 }
@@ -1867,7 +1867,7 @@ const SIDEBAR_TABS: Record<"lhs" | "rhs", string> = {
 };
 
 const sidebarTabBindings = {
-  lhs: window.Chem0Shell.bindPaneTabs({
+  lhs: window.Phys0Shell.bindPaneTabs({
     buttonsSelector: '.tab-btn[data-tab^="lhs:"]',
     initialTab: SIDEBAR_TABS.lhs,
     onActivate: (tab) => {
@@ -1878,7 +1878,7 @@ const sidebarTabBindings = {
     },
     paneRoot: lhsSidebar
   }),
-  rhs: window.Chem0Shell.bindPaneTabs({
+  rhs: window.Phys0Shell.bindPaneTabs({
     buttonsSelector: '.tab-btn[data-tab^="rhs:"]',
     initialTab: SIDEBAR_TABS.rhs,
     onActivate: (tab) => {
@@ -1926,9 +1926,9 @@ async function boot(): Promise<void> {
   // catalog row and pinned 0–14 chart exist before the first sample arrives.
   registerMetric("pH", { min: 0, max: 14 });
   scheduleMetricRender(true);
-  const [tools] = await Promise.all([window.chem0.listTools(), refreshWorlds(), refreshAssets()]);
+  const [tools] = await Promise.all([window.phys0.listTools(), refreshWorlds(), refreshAssets()]);
   await refreshExperiments();
-  const defaultRobot = await window.chem0.callTool("get_default_robot", { world_id: selectedWorldId });
+  const defaultRobot = await window.phys0.callTool("get_default_robot", { world_id: selectedWorldId });
   defaultRobotId = typeof defaultRobot.robot_id === "string" ? defaultRobot.robot_id : "";
   defaultRobotInput.value = defaultRobotId;
   show(tools);
@@ -2011,11 +2011,11 @@ experimentSelect.addEventListener("change", () => void selectExperiment(experime
 refreshRobotsBtn.addEventListener("click", () => void refreshRobots());
 refreshArtifactsBtn.addEventListener("click", () => void refreshArtifacts());
 
-document.querySelector("#open-record")?.addEventListener("click", async () => show(await window.chem0.openRecordWindow()));
-document.querySelector("#open-train")?.addEventListener("click", async () => show(await window.chem0.openTrainWindow()));
-document.querySelector("#open-replay")?.addEventListener("click", async () => show(await window.chem0.openReplayWindow()));
-document.querySelector("#open-calibration")?.addEventListener("click", async () => show(await window.chem0.openCalibrationWindow()));
-openSettingsBtn.addEventListener("click", async () => show(await window.chem0.openSettingsWindow()));
+document.querySelector("#open-record")?.addEventListener("click", async () => show(await window.phys0.openRecordWindow()));
+document.querySelector("#open-train")?.addEventListener("click", async () => show(await window.phys0.openTrainWindow()));
+document.querySelector("#open-replay")?.addEventListener("click", async () => show(await window.phys0.openReplayWindow()));
+document.querySelector("#open-calibration")?.addEventListener("click", async () => show(await window.phys0.openCalibrationWindow()));
+openSettingsBtn.addEventListener("click", async () => show(await window.phys0.openSettingsWindow()));
 setDefaultRobot.addEventListener("click", async () => {
   const robotId = defaultRobotInput.value.trim();
   if (!robotId) {
@@ -2071,7 +2071,7 @@ async function sendToAgent(raw: string): Promise<void> {
     model: "gpt-5.5"
   };
   if (sessionId) payload.session_id = sessionId;
-  await window.chem0.sendAgentMessage(payload);
+  await window.phys0.sendAgentMessage(payload);
 }
 
 async function blobToBase64(blob: Blob): Promise<string> {
@@ -2128,7 +2128,7 @@ recordAudio.addEventListener("click", async () => {
   else await startVoiceRecording();
 });
 
-window.chem0.onAgentEvent((event) => {
+window.phys0.onAgentEvent((event) => {
   if (event.experiment_id !== experimentId) return;
   if (event.session_id && !sessionId) sessionId = String(event.session_id);
   if (event.type === "message") {
@@ -2164,20 +2164,20 @@ window.chem0.onAgentEvent((event) => {
 });
 
 window.addEventListener("resize", () => scheduleMetricRender());
-window.addEventListener("chem0:virtual-camera-frame", updateWorldPreviewCanvases);
+window.addEventListener("phys0:virtual-camera-frame", updateWorldPreviewCanvases);
 // Charts read their colors from CSS variables, so a theme switch needs a redraw.
-window.chem0.onSettingsChanged(() => scheduleMetricRender());
+window.phys0.onSettingsChanged(() => scheduleMetricRender());
 
 /* --------------------------- toolbar tooltips --------------------------- */
 
-window.Chem0Shell.installThemeSync({
-  getSettings: () => window.chem0.getSettings(),
-  onSettingsChanged: (handler) => window.chem0.onSettingsChanged(handler)
+window.Phys0Shell.installThemeSync({
+  getSettings: () => window.phys0.getSettings(),
+  onSettingsChanged: (handler) => window.phys0.onSettingsChanged(handler)
 });
 
-window.Chem0Shell.installToolbarTooltips({
-  getSettings: () => window.chem0.getSettings(),
-  onSettingsChanged: (handler) => window.chem0.onSettingsChanged(handler)
+window.Phys0Shell.installToolbarTooltips({
+  getSettings: () => window.phys0.getSettings(),
+  onSettingsChanged: (handler) => window.phys0.onSettingsChanged(handler)
 });
 
 void boot();

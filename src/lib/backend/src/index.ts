@@ -1,4 +1,4 @@
-export { Chem0Backend } from "./backend";
+export { Phys0Backend } from "./backend";
 export {
   normalizeSeed,
   physicsBodyTypeForEntity,

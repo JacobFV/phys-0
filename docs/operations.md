@@ -5,7 +5,7 @@ Use this as the default operating sequence for an agent controlling the arm.
 ## First Prompt For An Agent
 
 ```text
-Use the chem-0 MCP. Create an experiment first and pass the returned
+Use the phys-0 MCP. Create an experiment first and pass the returned
 experiment_id into each hardware/camera/robot tool call. Read
 lerobot://pose-table, list cameras, view camera 0, probe the LeRobot servos,
 connect to the SO101 arm, observe the current pose, then use

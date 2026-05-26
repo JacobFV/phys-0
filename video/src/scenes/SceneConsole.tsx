@@ -47,7 +47,7 @@ export const SceneConsole: React.FC = () => {
         <div style={{ position: "relative" }}>
           <ElectronFrame
             src="electron/static_index.html"
-            title="chem-0 · exp_a3f9 · ph_strips · unknowns"
+            title="phys-0 · exp_a3f9 · ph_strips · unknowns"
             width={windowW}
             height={windowH}
           />

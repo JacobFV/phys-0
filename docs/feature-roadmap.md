@@ -65,7 +65,7 @@ collisions, or articulated robots.
       settler once parity is verified.
 - [x] Sync Rapier transforms back to THREE.js scene objects each frame.
 - [x] Regression check: SO-101 spawn, pose, collision still behave (preserve
-      chem-0 workflows per the ledger).
+      phys-0 workflows per the ledger).
 
 **Key files.** `src/apps/electron/src/renderer/virtual-world3d.mjs`,
 `src/lib/backend/src/types.ts`, `src/lib/backend/src/physSchema.ts`,
@@ -444,7 +444,7 @@ All blocking decisions settled 2026-05-21. No open questions remain.
 
 - The ledger (`phys0-implementation-ledger.md`) is the source of truth for
   "verified" status — do not mark assets verified until canonicalized.
-- Preserve chem-0 SO-101 / camera / pH / experiment / voice / SQLite workflows
+- Preserve phys-0 SO-101 / camera / pH / experiment / voice / SQLite workflows
   through every change.
 - F2 (determinism) and F3 (multi-world) constrain F4–F7: every new subsystem
   must be seed-respecting and per-world isolated.

@@ -87,7 +87,7 @@ export const SceneBO: React.FC = () => {
                 marginBottom: 10,
               }}
             >
-              chem-0 · simulated BO trace · pH ↔ perturbation steps
+              phys-0 · simulated BO trace · pH ↔ perturbation steps
             </div>
             <div
               style={{

@@ -1,6 +1,6 @@
 # MCP Tools
 
-`chem-0` exposes a compact stdio MCP interface for camera viewing, joint-space
+`phys-0` exposes a compact stdio MCP interface for camera viewing, joint-space
 robot control, bounded Cartesian IK, and experiment logging. The MCP transport
 is implemented in TypeScript at `src/apps/mcp-node`; hardware calls are
 forwarded through the shared Node backend to the Python bridge.

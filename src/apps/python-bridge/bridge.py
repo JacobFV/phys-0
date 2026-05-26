@@ -12,7 +12,19 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "src" / "lib"))
 
-from chem0.core import HANDLERS, RESOURCES, TOOLS, STATE, read_resource  # noqa: E402
+from phys0.core import HANDLERS, RESOURCES, TOOLS, STATE, read_resource  # noqa: E402
+
+
+def format_error(exc: Exception) -> str:
+    if isinstance(exc, ModuleNotFoundError) and exc.name == "lerobot":
+        return (
+            "Python dependency 'lerobot' is not installed in the interpreter used by phys-0. "
+            "Create the repo virtualenv and install dependencies with: "
+            "python -m venv .venv && .venv/bin/python -m pip install --upgrade pip && "
+            ".venv/bin/python -m pip install -r requirements.txt\n"
+            f"{traceback.format_exc(limit=8)}"
+        )
+    return f"{exc}\n{traceback.format_exc(limit=8)}"
 
 
 def respond(message_id: Any, result: Any = None, error: str | None = None) -> None:
@@ -53,7 +65,7 @@ def main() -> int:
             try:
                 respond(message.get("id"), handle(message))
             except Exception as exc:
-                respond(message.get("id"), error=f"{exc}\n{traceback.format_exc(limit=8)}")
+                respond(message.get("id"), error=format_error(exc))
     finally:
         if STATE.connected:
             STATE.robot.disconnect()

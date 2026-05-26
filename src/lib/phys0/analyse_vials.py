@@ -3,8 +3,8 @@
 and identify reagents. Outputs JSONL results.
 
 Usage:
-    PYTHONPATH=src/lib .venv/bin/python src/lib/chem0/analyse_vials.py
-    PYTHONPATH=src/lib .venv/bin/python src/lib/chem0/analyse_vials.py --camera 0 --output results.jsonl
+    PYTHONPATH=src/lib .venv/bin/python src/lib/phys0/analyse_vials.py
+    PYTHONPATH=src/lib .venv/bin/python src/lib/phys0/analyse_vials.py --camera 0 --output results.jsonl
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 try:
-    from chem0.vision import (
+    from phys0.vision import (
         capture_frame,
         find_vials_with_blue_cap,
         infer_vial_ph,
@@ -26,7 +26,7 @@ try:
     )
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from chem0.vision import (
+    from phys0.vision import (
         capture_frame,
         find_vials_with_blue_cap,
         infer_vial_ph,
@@ -82,7 +82,7 @@ def analyse(
 
     # Save annotated frame
     if annotate:
-        from chem0.vision import PHResult
+        from phys0.vision import PHResult
         ph_results = [infer_vial_ph(frame, v) for v in vials[:max_vials]]
         annotated = annotate_frame(frame, vials[:max_vials], ph_results)
         ann_path = path.replace(".jpg", "_annotated.jpg")

@@ -11,7 +11,7 @@ export const MockWindow: React.FC<{
   style?: React.CSSProperties;
   children?: React.ReactNode;
   toolbar?: React.ReactNode;
-}> = ({ title = "chem-0 — lab console", width = 1500, height = 900, style, children, toolbar }) => {
+}> = ({ title = "phys-0 — lab console", width = 1500, height = 900, style, children, toolbar }) => {
   return (
     <div
       style={{

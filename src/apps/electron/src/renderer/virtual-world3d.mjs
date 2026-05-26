@@ -1722,7 +1722,7 @@ renderer.domElement.addEventListener("pointerup", (event) => {
 });
 
 function dragKind(event) {
-  const kind = event.dataTransfer?.getData("application/x-chem0-asset") || event.dataTransfer?.getData("text/plain") || "";
+  const kind = event.dataTransfer?.getData("application/x-phys0-asset") || event.dataTransfer?.getData("text/plain") || "";
   return /^[a-z0-9_]+$/i.test(kind) ? kind : "";
 }
 

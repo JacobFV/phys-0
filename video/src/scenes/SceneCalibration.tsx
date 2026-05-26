@@ -63,7 +63,7 @@ export const SceneCalibration: React.FC = () => {
           {/* LHS: the real wizard window, scaled small */}
           <ElectronFrame
             src="electron/static_calibration.html"
-            title="chem-0 · calibrate · mcp_so101"
+            title="phys-0 · calibrate · mcp_so101"
             width={1020}
             height={640}
             innerW={1720}

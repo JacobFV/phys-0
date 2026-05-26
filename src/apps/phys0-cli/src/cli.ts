@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import path from "node:path";
-import { Chem0Backend, type JsonObject } from "@chem0/backend";
+import { Phys0Backend, type JsonObject } from "@phys0/backend";
 
 type Parsed = {
   positional: string[];
@@ -54,7 +54,7 @@ function parsePose(flags: Parsed["flags"]): JsonObject | undefined {
 async function main(): Promise<void> {
   const parsed = parse(process.argv.slice(2));
   const [scope, action, arg] = parsed.positional;
-  const backend = new Chem0Backend(repoRoot);
+  const backend = new Phys0Backend(repoRoot);
   await backend.init();
   try {
     if (!scope || scope === "help" || parsed.flags.help) {

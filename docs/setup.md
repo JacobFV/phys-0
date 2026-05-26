@@ -1,6 +1,6 @@
 # Setup
 
-This document captures the setup needed to run `chem-0` without relying on chat
+This document captures the setup needed to run `phys-0` without relying on chat
 history.
 
 ## Hardware
@@ -102,7 +102,7 @@ Run the MCP server:
 node src/apps/mcp-node/dist/server.js
 ```
 
-## Chem-0 Lab Console
+## Phys-0 Lab Console
 
 Install Node dependencies and run the desktop console:
 
@@ -112,8 +112,8 @@ npm run electron:dev
 ```
 
 The Electron app lives in `src/apps/electron`. Its main process hosts the same
-`@chem0/backend` package used by the MCP server. The backend owns
-`data/chem0.sqlite`, `data/blobs`, the Python bridge, and GPT-5.5 streaming
+`@phys0/backend` package used by the MCP server. The backend owns
+`data/phys0.sqlite`, `data/blobs`, the Python bridge, and GPT-5.5 streaming
 agent sessions. The main window shows local camera streams and, for each
 detected connected SO-101 bus, a live 3D mesh view driven by raw servo
 positions.
@@ -125,7 +125,7 @@ Add:
 ```json
 {
   "mcpServers": {
-    "chem-0": {
+    "phys-0": {
       "command": "node",
       "args": [
         "/Users/vibestartup/Code/lerobot-test/src/apps/mcp-node/dist/server.js"

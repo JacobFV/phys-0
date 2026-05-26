@@ -2,7 +2,7 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { Chem0Backend } = require("../src/lib/backend/dist");
+const { Phys0Backend } = require("../src/lib/backend/dist");
 
 async function buildWorld(backend, name, seed, height) {
   const { world } = await backend.callTool("create_world", { name, type: "virtual", seed });
@@ -18,7 +18,7 @@ async function buildWorld(backend, name, seed, height) {
 
 async function run() {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "phys0-multi-world-"));
-  const backend = new Chem0Backend(path.resolve(__dirname, ".."), dataDir);
+  const backend = new Phys0Backend(path.resolve(__dirname, ".."), dataDir);
   try {
     await backend.init();
     const a = await buildWorld(backend, "A", 101, 1);

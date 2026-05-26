@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>Chem-0 Settings</title>
+    <title>Phys-0 Settings</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -55,17 +55,17 @@
         </section>
         <section class="settings-section">
           <h2>About</h2>
-          <p>chem-0 lab console &middot; local LeRobot experiment platform.</p>
+          <p>phys-0 lab console &middot; local LeRobot experiment platform.</p>
         </section>
       </section>
     </main>
     <script src="./app-shell.js"></script>
     <script>
-      document.body.classList.add(`platform-${window.chem0?.platform ?? "darwin"}`);
+      document.body.classList.add(`platform-${window.phys0?.platform ?? "darwin"}`);
 
-      window.Chem0Shell.installThemeSync({
-        getSettings: () => window.chem0.getSettings(),
-        onSettingsChanged: (handler) => window.chem0.onSettingsChanged(handler)
+      window.Phys0Shell.installThemeSync({
+        getSettings: () => window.phys0.getSettings(),
+        onSettingsChanged: (handler) => window.phys0.onSettingsChanged(handler)
       });
 
       const robotInput = document.getElementById("settings-default-robot");
@@ -82,35 +82,35 @@
 
       (async () => {
         try {
-          const current = await window.chem0.callTool("get_default_robot", {});
+          const current = await window.phys0.callTool("get_default_robot", {});
           if (typeof current.robot_id === "string") robotInput.value = current.robot_id;
         } catch {}
         try {
-          const settings = await window.chem0.getSettings();
+          const settings = await window.phys0.getSettings();
           tooltipsBox.checked = settings.showToolbarTooltips !== false;
           setActiveTheme(settings.theme);
         } catch {}
       })();
 
-      window.chem0.onSettingsChanged((settings) => {
+      window.phys0.onSettingsChanged((settings) => {
         if (settings && typeof settings.theme === "string") setActiveTheme(settings.theme);
       });
 
       robotSave.addEventListener("click", async () => {
         const robot_id = robotInput.value.trim();
         if (!robot_id) return;
-        await window.chem0.callTool("set_default_robot", { robot_id });
+        await window.phys0.callTool("set_default_robot", { robot_id });
       });
 
       tooltipsBox.addEventListener("change", async () => {
-        await window.chem0.setSetting("showToolbarTooltips", tooltipsBox.checked);
+        await window.phys0.setSetting("showToolbarTooltips", tooltipsBox.checked);
       });
 
       for (const radio of themeRadios) {
         radio.addEventListener("change", async () => {
           if (!radio.checked) return;
-          window.Chem0Shell.applyTheme(radio.value);
-          await window.chem0.setSetting("theme", radio.value);
+          window.Phys0Shell.applyTheme(radio.value);
+          await window.phys0.setSetting("theme", radio.value);
         });
       }
     </script>

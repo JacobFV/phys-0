@@ -1,4 +1,4 @@
-# chem-0 — Narration script v3 (Dr. Quibble · ElevenLabs)
+# phys-0 — Narration script v3 (Dr. Quibble · ElevenLabs)
 
 Faster, more accurate, more "showing real shit happening in the background".
 The model keeps the visuals doing things while the voice talks. Target

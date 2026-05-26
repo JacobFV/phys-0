@@ -19,7 +19,7 @@ export const ElectronFrame: React.FC<{
   style?: React.CSSProperties;
 }> = ({
   src,
-  title = "chem-0",
+  title = "phys-0",
   width = 1720,
   height = 900,
   innerW = 1720,

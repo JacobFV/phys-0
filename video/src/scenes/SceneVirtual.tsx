@@ -41,7 +41,7 @@ export const SceneVirtual: React.FC = () => {
         <div style={{ position: "relative" }}>
           <ElectronFrame
             src="electron/static_virtual_world.html"
-            title="chem-0 · world editor · bench_world_v3"
+            title="phys-0 · world editor · bench_world_v3"
             width={W}
             height={H}
           />

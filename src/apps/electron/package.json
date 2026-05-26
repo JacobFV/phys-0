@@ -1,7 +1,7 @@
 {
-  "name": "@chem0/electron",
-  "productName": "Chem-0 Lab Console",
-  "description": "Local LeRobot experiment console backed by chem-0.",
+  "name": "@phys0/electron",
+  "productName": "Phys-0 Lab Console",
+  "description": "Local LeRobot experiment console backed by phys-0.",
   "version": "0.1.0",
   "private": true,
   "main": "dist/main/main.js",
@@ -17,7 +17,7 @@
     ]
   },
   "dependencies": {
-    "@chem0/backend": "0.1.0",
+    "@phys0/backend": "0.1.0",
     "@dimforge/rapier3d-compat": "^0.19.3",
     "three": "^0.184.0"
   },

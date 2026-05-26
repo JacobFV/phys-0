@@ -36,7 +36,7 @@ LEADER_PORT=/dev/cu.usbmodem5A7A0187661
   FOLLOWER_PORT=/dev/cu.usbmodem5A460833421  
   USER=indiraschka                               
 - for TASK in swirl pick-and-pour discard; do
-  .venv/bin/python src/lib/chem0/scripts/lerobot_record.py \
+  .venv/bin/python src/lib/phys0/scripts/lerobot_record.py \
     --robot.type=so101_follower \
     --robot.port=$FOLLOWER_PORT \
     --robot.id=mcp_so101 \
@@ -44,7 +44,7 @@ LEADER_PORT=/dev/cu.usbmodem5A7A0187661
     --teleop.type=so101_leader \
     --teleop.port=$LEADER_PORT \
     --teleop.id=mcp_so101_leader \
-    --dataset.repo_id= $USER/chem0-$ TASK \
+    --dataset.repo_id= $USER/phys0-$ TASK \
     --dataset.num_episodes=10 \
     --dataset.single_task="$TASK" \
     --dataset.episode_time_s=20 \

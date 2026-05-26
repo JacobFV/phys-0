@@ -1,4 +1,4 @@
-# Agent Handoff For chem-0
+# Agent Handoff For phys-0
 
 This repo contains a local LeRobot experiment platform. The stdio MCP server
 and Electron GUI both use the same TypeScript Node backend. The backend owns
@@ -25,7 +25,7 @@ robot id: mcp_so101
 serial port: /dev/cu.usbmodem5AB01815731
 camera id: 0
 pose resource: lerobot://pose-table
-data store: data/chem0.sqlite
+data store: data/phys0.sqlite
 blob store: data/blobs
 ```
 
@@ -83,7 +83,7 @@ speech without an API.
 ```json
 {
   "mcpServers": {
-    "chem-0": {
+    "phys-0": {
       "command": "node",
       "args": [
         "/Users/vibestartup/Code/lerobot-test/src/apps/mcp-node/dist/server.js"
@@ -117,7 +117,7 @@ speech without an API.
     the run.
 16. `disconnect`.
 
-MCP clients cannot fully mirror their chat history into chem-0. Passing
+MCP clients cannot fully mirror their chat history into phys-0. Passing
 `experiment_id` into tool calls is therefore required for useful MCP-side
 experiment logs. Electron sessions are preferred when full streaming message
 history is needed.
@@ -180,7 +180,7 @@ Do not assume joint names imply visual direction. Use camera frames.
 ## Testing
 
 ```sh
-PYTHONPATH=src/lib .venv/bin/python -m py_compile src/apps/python-bridge/bridge.py src/lib/chem0/core.py
+PYTHONPATH=src/lib .venv/bin/python -m py_compile src/apps/python-bridge/bridge.py src/lib/phys0/core.py
 npm run build
 npm audit --omit=dev
 ```

@@ -36,7 +36,7 @@ const now = () => new Date().toISOString();
 const id = (prefix: string) => `${prefix}_${Date.now().toString(36)}_${randomUUID().slice(0, 8)}`;
 export const DEFAULT_PHYSICAL_WORLD_ID = "world_physical_default";
 
-export class Chem0Store {
+export class Phys0Store {
   private SQL: SqlJsStatic | null = null;
   private db: Database | null = null;
   readonly dataDir: string;
@@ -45,7 +45,7 @@ export class Chem0Store {
 
   constructor(repoRoot: string, dataDir = path.join(repoRoot, "data")) {
     this.dataDir = dataDir;
-    this.dbPath = path.join(dataDir, "chem0.sqlite");
+    this.dbPath = path.join(dataDir, "phys0.sqlite");
     this.blobDir = path.join(dataDir, "blobs");
   }
 

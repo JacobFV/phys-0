@@ -1,4 +1,4 @@
-"""chem-0 robot control library.
+"""phys-0 robot control library.
 
 Modules:
     core      — Robot arm control, camera, kinematics, MCP tool handlers

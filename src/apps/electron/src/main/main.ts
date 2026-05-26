@@ -1,12 +1,12 @@
 import { app, BrowserWindow, ipcMain, Menu, session } from "electron";
 import fs from "node:fs";
 import path from "node:path";
-import { Chem0Backend, type JsonObject } from "@chem0/backend";
+import { Phys0Backend, type JsonObject } from "@phys0/backend";
 
 const repoRoot = path.resolve(__dirname, "../../../../..");
-const backend = new Chem0Backend(repoRoot);
+const backend = new Phys0Backend(repoRoot);
 const windows = new Set<BrowserWindow>();
-const APP_NAME = "Chem-0 Lab Console";
+const APP_NAME = "Phys-0 Lab Console";
 
 const settingsPath = path.join(repoRoot, "data", "settings.json");
 const settingsDefaults: JsonObject = { showToolbarTooltips: true, theme: "light" };
@@ -48,7 +48,7 @@ function persistSettings(): void {
 
 function broadcastSettings(): void {
   for (const win of windows) {
-    if (!win.isDestroyed()) win.webContents.send("chem0:settings-changed", settingsState);
+    if (!win.isDestroyed()) win.webContents.send("phys0:settings-changed", settingsState);
   }
 }
 
@@ -102,7 +102,7 @@ function installApplicationMenu(): void {
 
 function sendAgentEvent(event: unknown): void {
   for (const win of windows) {
-    if (!win.isDestroyed()) win.webContents.send("chem0:agent-event", event);
+    if (!win.isDestroyed()) win.webContents.send("phys0:agent-event", event);
   }
 }
 
@@ -230,7 +230,7 @@ function createWorkbenchWindow(opts: { tab: WorkbenchTab; detached: boolean }): 
 
 function openOrFocusWorkbench(tab: WorkbenchTab): BrowserWindow {
   if (workbenchWindow && !workbenchWindow.isDestroyed()) {
-    workbenchWindow.webContents.send("chem0:workbench-set-tab", { tab });
+    workbenchWindow.webContents.send("phys0:workbench-set-tab", { tab });
     workbenchWindow.setTitle(workbenchTitle(tab, false));
     if (workbenchWindow.isMinimized()) workbenchWindow.restore();
     workbenchWindow.focus();
@@ -245,9 +245,9 @@ app.whenReady().then(async () => {
   app.setAboutPanelOptions({
     applicationName: APP_NAME,
     applicationVersion: app.getVersion(),
-    copyright: "Local chem-0 research project"
+    copyright: "Local phys-0 research project"
   });
-  backend.on("stderr", (text: string) => console.error(`[chem-0 python] ${text}`));
+  backend.on("stderr", (text: string) => console.error(`[phys-0 python] ${text}`));
   backend.on("agent-event", sendAgentEvent);
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
     callback(permission === "media");
@@ -261,7 +261,7 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-ipcMain.handle("chem0:read-json-file", async (_event, filePath: string) => {
+ipcMain.handle("phys0:read-json-file", async (_event, filePath: string) => {
   try {
     const text = fs.readFileSync(filePath, "utf8");
     return { ok: true, data: JSON.parse(text) };
@@ -269,24 +269,24 @@ ipcMain.handle("chem0:read-json-file", async (_event, filePath: string) => {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 });
-ipcMain.handle("chem0:tools-list", async () => backend.listTools());
-ipcMain.handle("chem0:resource-read", async (_event, uri: string) => backend.readResource(uri));
-ipcMain.handle("chem0:urdf-read", async () => ({
+ipcMain.handle("phys0:tools-list", async () => backend.listTools());
+ipcMain.handle("phys0:resource-read", async (_event, uri: string) => backend.readResource(uri));
+ipcMain.handle("phys0:urdf-read", async () => ({
   path: path.join(repoRoot, "assets/kinematics/so101_kinematics.urdf"),
   text: fs.readFileSync(path.join(repoRoot, "assets/kinematics/so101_kinematics.urdf"), "utf8")
 }));
-ipcMain.handle("chem0:tool-call", async (_event, name: string, args: JsonObject) => backend.callTool(name, args));
-ipcMain.handle("chem0:create-experiment", async (_event, name: string, metadata: JsonObject = {}, worldId?: string) =>
+ipcMain.handle("phys0:tool-call", async (_event, name: string, args: JsonObject) => backend.callTool(name, args));
+ipcMain.handle("phys0:create-experiment", async (_event, name: string, metadata: JsonObject = {}, worldId?: string) =>
   backend.createExperiment(name, metadata, typeof worldId === "string" && worldId.trim() ? worldId : undefined)
 );
-ipcMain.handle("chem0:list-experiments", async () => ({ experiments: backend.listExperiments() as unknown as JsonObject[] }));
-ipcMain.handle("chem0:list-events", async (_event, experimentId: string) => ({
+ipcMain.handle("phys0:list-experiments", async () => ({ experiments: backend.listExperiments() as unknown as JsonObject[] }));
+ipcMain.handle("phys0:list-events", async (_event, experimentId: string) => ({
   events: backend.store.listEvents(experimentId) as unknown as JsonObject[]
 }));
-ipcMain.handle("chem0:list-artifacts", async (_event, experimentId: string) => ({
+ipcMain.handle("phys0:list-artifacts", async (_event, experimentId: string) => ({
   artifacts: backend.store.listArtifacts(experimentId)
 }));
-ipcMain.handle("chem0:agent-message", async (_event, input: JsonObject) => {
+ipcMain.handle("phys0:agent-message", async (_event, input: JsonObject) => {
   void backend.streamAgentMessage({
     experimentId: String(input.experiment_id),
     sessionId: typeof input.session_id === "string" ? input.session_id : undefined,
@@ -295,51 +295,51 @@ ipcMain.handle("chem0:agent-message", async (_event, input: JsonObject) => {
   });
   return { accepted: true };
 });
-ipcMain.handle("chem0:open-calibration-window", async () => {
+ipcMain.handle("phys0:open-calibration-window", async () => {
   createCalibrationWindow();
   return { opened: true };
 });
 
-ipcMain.handle("chem0:open-record-window", async () => {
+ipcMain.handle("phys0:open-record-window", async () => {
   openOrFocusWorkbench("record");
   return { opened: true };
 });
 
-ipcMain.handle("chem0:open-train-window", async () => {
+ipcMain.handle("phys0:open-train-window", async () => {
   openOrFocusWorkbench("train");
   return { opened: true };
 });
 
-ipcMain.handle("chem0:open-replay-window", async () => {
+ipcMain.handle("phys0:open-replay-window", async () => {
   openOrFocusWorkbench("replay");
   return { opened: true };
 });
 
-ipcMain.handle("chem0:open-workbench-window", async (_event, tab: string = "record") => {
+ipcMain.handle("phys0:open-workbench-window", async (_event, tab: string = "record") => {
   const normalized: WorkbenchTab = tab === "train" || tab === "replay" ? tab : "record";
   openOrFocusWorkbench(normalized);
   return { opened: true };
 });
 
-ipcMain.handle("chem0:detach-workbench-tab", async (_event, tab: string) => {
+ipcMain.handle("phys0:detach-workbench-tab", async (_event, tab: string) => {
   const normalized: WorkbenchTab = tab === "train" || tab === "replay" ? tab : "record";
   createWorkbenchWindow({ tab: normalized, detached: true });
   return { detached: true };
 });
 
-ipcMain.handle("chem0:open-settings-window", async () => {
+ipcMain.handle("phys0:open-settings-window", async () => {
   createSettingsWindow();
   return { opened: true };
 });
 
-ipcMain.handle("chem0:open-virtual-world-window", async (_event, worldId: string) => {
+ipcMain.handle("phys0:open-virtual-world-window", async (_event, worldId: string) => {
   createVirtualWorldWindow(worldId);
   return { opened: true, world_id: worldId };
 });
 
-ipcMain.handle("chem0:get-settings", async () => settingsState);
+ipcMain.handle("phys0:get-settings", async () => settingsState);
 
-ipcMain.handle("chem0:set-setting", async (_event, key: string, value: unknown) => {
+ipcMain.handle("phys0:set-setting", async (_event, key: string, value: unknown) => {
   settingsState = { ...settingsState, [key]: value as never };
   persistSettings();
   if (key === "theme") applyTitleBarOverlay();

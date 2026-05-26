@@ -10,7 +10,7 @@ import {
 import { Paper } from "../components/Paper";
 import { palette, type } from "../theme";
 
-// chem-0 wordmark dropping in over a dimmed cover photo of the rig.
+// phys-0 wordmark dropping in over a dimmed cover photo of the rig.
 // All-caps mono brand tag above; sans subtitle below.
 export const SceneTitle: React.FC = () => {
   const frame = useCurrentFrame();
@@ -85,7 +85,7 @@ export const SceneTitle: React.FC = () => {
             opacity: t,
           }}
         >
-          chem-0
+          phys-0
         </div>
         <div
           style={{
@@ -120,7 +120,7 @@ export const SceneTitle: React.FC = () => {
             opacity: tagline,
           }}
         >
-          github.com/JacobFV/chem-0   ·   may 2026
+          github.com/JacobFV/phys-0   ·   may 2026
         </div>
       </div>
     </Paper>

@@ -300,8 +300,8 @@ async function pollDuoPositions() {
   const lPort = selectedPort(leaderSelect);
   const fPort = selectedPort(followerSelect);
   const results = await Promise.allSettled([
-    lPort ? window.chem0.callTool("read_so101_raw_positions", { port: lPort }) : Promise.resolve(null),
-    fPort ? window.chem0.callTool("read_so101_raw_positions", { port: fPort }) : Promise.resolve(null),
+    lPort ? window.phys0.callTool("read_so101_raw_positions", { port: lPort }) : Promise.resolve(null),
+    fPort ? window.phys0.callTool("read_so101_raw_positions", { port: fPort }) : Promise.resolve(null),
   ]);
   for (const [key, result] of [["leader", results[0]], ["follower", results[1]]]) {
     if (result.status === "fulfilled" && result.value && !result.value.isError) {
@@ -321,7 +321,7 @@ async function refreshArms() {
   startStatus.textContent = "Scanning for arms…";
   startButton.disabled = true;
   try {
-    const parsed = parseToolJson(await window.chem0.callTool("list_connected_robots", { max_id: 12 }));
+    const parsed = parseToolJson(await window.phys0.callTool("list_connected_robots", { max_id: 12 }));
     const robots = Array.isArray(parsed.robots) ? parsed.robots : [];
     for (const select of [leaderSelect, followerSelect]) {
       select.replaceChildren();
@@ -370,7 +370,7 @@ function renderRecordUI() {
 async function captureFrame() {
   if (!sessionId) return;
   try {
-    const result = await window.chem0.callTool("capture_lerobot_frame", { session_id: sessionId });
+    const result = await window.phys0.callTool("capture_lerobot_frame", { session_id: sessionId });
     if (!result?.isError) {
       capturedCount += 1;
       frameCounter.textContent = `${capturedCount} frames`;
@@ -404,7 +404,7 @@ async function handleStartSession() {
     taskName = taskSelect.value;
     targetCount = parseInt(targetEpisodes.value, 10) || 5;
 
-    const result = await window.chem0.callTool("start_lerobot_session", {
+    const result = await window.phys0.callTool("start_lerobot_session", {
       leader_port: lPort,
       follower_port: fPort,
       repo_id: repoId,
@@ -434,7 +434,7 @@ async function handleRecordButton() {
     // Start new episode
     busy = true;
     try {
-      await window.chem0.callTool("start_lerobot_episode", { session_id: sessionId });
+      await window.phys0.callTool("start_lerobot_episode", { session_id: sessionId });
       recording = true;
       recButton.disabled = true;
       await startCaptureLoop();
@@ -451,7 +451,7 @@ async function handleRecordButton() {
       recButton.disabled = true;
       recButton.textContent = "SAVING…";
       stopCaptureLoop();
-      const result = await window.chem0.callTool("save_lerobot_episode", { session_id: sessionId });
+      const result = await window.phys0.callTool("save_lerobot_episode", { session_id: sessionId });
       if (!result?.isError) {
         currentEpisode += 1;
       }
@@ -469,7 +469,7 @@ async function handleStopSession() {
   try {
     stopCaptureLoop();
     recording = false;
-    await window.chem0.callTool("stop_lerobot_session", { session_id: sessionId });
+    await window.phys0.callTool("stop_lerobot_session", { session_id: sessionId });
     sessionId = "";
     mode = "done";
     doneSummary.textContent = `${currentEpisode} episodes of ${taskName}`;
@@ -493,7 +493,7 @@ stopSessionButton.addEventListener("click", () => void handleStopSession());
 closeButton.addEventListener("click", () => window.close());
 
 window.addEventListener("beforeunload", () => {
-  if (sessionId) window.chem0.callTool("stop_lerobot_session", { session_id: sessionId }).catch(() => {});
+  if (sessionId) window.phys0.callTool("stop_lerobot_session", { session_id: sessionId }).catch(() => {});
   if (pollTimer) clearInterval(pollTimer);
   if (captureTimer) clearInterval(captureTimer);
   if (animationFrame) cancelAnimationFrame(animationFrame);

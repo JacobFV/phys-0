@@ -177,9 +177,9 @@ function rendererFor(canvas) {
 }
 
 async function refreshWorldState() {
-  if (!window.chem0 || performance.now() - lastRefreshMs < 1200) return;
+  if (!window.phys0 || performance.now() - lastRefreshMs < 1200) return;
   lastRefreshMs = performance.now();
-  const result = await window.chem0.callTool("list_worlds", {});
+  const result = await window.phys0.callTool("list_worlds", {});
   worlds = Array.isArray(result.worlds) ? result.worlds : [];
   entities = Array.isArray(result.virtual_entities) ? result.virtual_entities : [];
 }
@@ -262,7 +262,7 @@ function renderVirtualCameras() {
       rendered = renderCameraToCanvas(cameraEntity, worldEntities, canvas, 50, now) || rendered;
     }
   }
-  if (rendered) window.requestAnimationFrame(() => window.dispatchEvent(new Event("chem0:virtual-camera-frame")));
+  if (rendered) window.requestAnimationFrame(() => window.dispatchEvent(new Event("phys0:virtual-camera-frame")));
 }
 
 async function animate() {
@@ -276,7 +276,7 @@ async function animate() {
   window.setTimeout(() => void animate(), 50);
 }
 
-window.addEventListener("chem0:world-selected", (event) => {
+window.addEventListener("phys0:world-selected", (event) => {
   selectedWorldId = String(event.detail?.worldId || selectedWorldId);
   lastRefreshMs = 0;
 });

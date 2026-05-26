@@ -1,6 +1,6 @@
 # Kinematics
 
-`chem-0` supports a small Cartesian control layer on top of the original
+`phys-0` supports a small Cartesian control layer on top of the original
 six-joint pose interface.
 
 ## Implementation

@@ -2,7 +2,7 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const { Chem0Backend } = require("../src/lib/backend/dist");
+const { Phys0Backend } = require("../src/lib/backend/dist");
 
 async function stepMany(backend, sessionId, count) {
   for (let i = 0; i < count; i += 1) {
@@ -12,7 +12,7 @@ async function stepMany(backend, sessionId, count) {
 
 async function run() {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "phys0-aerial-"));
-  const backend = new Chem0Backend(path.resolve(__dirname, ".."), dataDir);
+  const backend = new Phys0Backend(path.resolve(__dirname, ".."), dataDir);
   try {
     await backend.init();
     const { world } = await backend.callTool("create_world", { name: "aerial", type: "virtual", seed: 404 });

@@ -3,7 +3,7 @@ export {};
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 type JsonObject = { [key: string]: JsonValue };
 
-window.Chem0Shell.applyPlatformClass(window.chem0?.platform);
+window.Phys0Shell.applyPlatformClass(window.phys0?.platform);
 
 const params = new URLSearchParams(window.location.search);
 const initialTabRaw = (params.get("tab") ?? "record").toLowerCase();
@@ -23,7 +23,7 @@ const statusPillEl = document.querySelector<HTMLDivElement>("#wb-status-pill");
 
 let currentTab: TabName = isTab(initialTabRaw) ? initialTabRaw : "record";
 
-const tabBinding = window.Chem0Shell.bindPaneTabs({
+const tabBinding = window.Phys0Shell.bindPaneTabs({
   buttonsSelector: ".appbar .tab-btn",
   initialTab: currentTab,
   onActivate: (tab) => {
@@ -46,13 +46,13 @@ if (detached) {
 }
 
 document.querySelector<HTMLButtonElement>("#wb-detach")?.addEventListener("click", async () => {
-  await window.chem0.detachWorkbenchTab(currentTab);
+  await window.phys0.detachWorkbenchTab(currentTab);
 });
 document.querySelector<HTMLButtonElement>("#wb-open-settings")?.addEventListener("click", async () => {
-  await window.chem0.openSettingsWindow();
+  await window.phys0.openSettingsWindow();
 });
 
-window.chem0.onWorkbenchSetTab?.(({ tab }) => {
+window.phys0.onWorkbenchSetTab?.(({ tab }) => {
   if (isTab(tab)) activateTab(tab);
 });
 
@@ -70,14 +70,14 @@ injectScript("./record3d.mjs", true);
 injectScript("./train.js");
 injectScript("./replay.js");
 
-window.Chem0Shell.installThemeSync({
-  getSettings: () => window.chem0.getSettings(),
-  onSettingsChanged: (handler) => window.chem0.onSettingsChanged(handler)
+window.Phys0Shell.installThemeSync({
+  getSettings: () => window.phys0.getSettings(),
+  onSettingsChanged: (handler) => window.phys0.onSettingsChanged(handler)
 });
 
-window.Chem0Shell.installToolbarTooltips({
-  getSettings: () => window.chem0.getSettings(),
-  onSettingsChanged: (handler) => window.chem0.onSettingsChanged(handler)
+window.Phys0Shell.installToolbarTooltips({
+  getSettings: () => window.phys0.getSettings(),
+  onSettingsChanged: (handler) => window.phys0.onSettingsChanged(handler)
 });
 
 /* the ?: silences ts unused warnings on JsonValue when no params consumed */

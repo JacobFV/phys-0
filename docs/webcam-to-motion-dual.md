@@ -156,7 +156,7 @@ Always read the pose table (`lerobot://pose-table` or `get_pose_table`) before c
 | File | What it provides |
 |------|-----------------|
 | `scripts/calibrate_so101_deterministic.py` | Joint definitions, calibration methodology, endpoint pairs, servo IDs |
-| `src/lib/chem0/core.py` | All tool implementations, `JOINT_LIMITS`, `POSE_TABLE`, `CARTESIAN_BOUNDS`, `CALIBRATION_STEPS` |
+| `src/lib/phys0/core.py` | All tool implementations, `JOINT_LIMITS`, `POSE_TABLE`, `CARTESIAN_BOUNDS`, `CALIBRATION_STEPS` |
 | `docs/pose-table.md` | Reference poses, units, limits, spatial notes |
 | `assets/kinematics/so101_kinematics.urdf` | Kinematic model for IK solver |
 | `docs/architecture.md` | System architecture overview |

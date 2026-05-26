@@ -1,23 +1,23 @@
-# Chem-0 Lab Console
+# Phys-0 Lab Console
 
-Chem-0 Lab Console is the TypeScript Electron desktop app in:
+Phys-0 Lab Console is the TypeScript Electron desktop app in:
 
 ```text
 src/apps/electron
 ```
 
-The Electron main process hosts `@chem0/backend` directly. It does not spawn the
+The Electron main process hosts `@phys0/backend` directly. It does not spawn the
 MCP server. That means the GUI and stdio MCP use the same backend code path
 while keeping their transport layers separate:
 
 ```text
-Electron renderer -> Electron IPC -> @chem0/backend -> Python bridge -> LeRobot/OpenCV
-MCP client        -> stdio MCP    -> @chem0/backend -> Python bridge -> LeRobot/OpenCV
+Electron renderer -> Electron IPC -> @phys0/backend -> Python bridge -> LeRobot/OpenCV
+MCP client        -> stdio MCP    -> @phys0/backend -> Python bridge -> LeRobot/OpenCV
 ```
 
 ## Backend Responsibilities
 
-- Initialize and save `data/chem0.sqlite`.
+- Initialize and save `data/phys0.sqlite`.
 - Manage `data/blobs` for camera and tool artifacts.
 - Create experiments and agent sessions.
 - Append `agent_session_events` for messages, assistant deltas, tool calls,

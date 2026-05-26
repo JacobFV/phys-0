@@ -56,7 +56,7 @@ only two regimes inside the broader substrate.
 
 ## Full Delivery Checklist
 
-- Preserve chem-0 SO-101, camera, pH, experiment, voice, and SQLite workflows.
+- Preserve phys-0 SO-101, camera, pH, experiment, voice, and SQLite workflows.
 - Canonicalize assets before calling them verified.
 - Track every asset patch with files, date, author, and rationale.
 - Keep source records visibly separate from spawnable, verified, and gold

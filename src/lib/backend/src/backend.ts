@@ -22,7 +22,7 @@ import {
 } from "./physSchema";
 import { ExternalRuntimeAdapter, LeRobotAdapter, parseRobotCommand, type PhysProtocolAdapter } from "./protocolAdapters";
 import { poseToJson } from "./rapierPhysics";
-import { Chem0Store, DEFAULT_PHYSICAL_WORLD_ID } from "./store";
+import { Phys0Store, DEFAULT_PHYSICAL_WORLD_ID } from "./store";
 import type { AerialControlCommand } from "./physics";
 import type { AssetFormat, AssetKind, AssetManifest, Experiment, JsonObject, JsonValue, PhysEntity, Protocol, RobotEmbodiment, RobotKind, WorldType } from "./types";
 
@@ -72,8 +72,8 @@ type SimSession = {
   lastSnapshot: SimWorkerResponse | null;
 };
 
-export class Chem0Backend extends EventEmitter {
-  readonly store: Chem0Store;
+export class Phys0Backend extends EventEmitter {
+  readonly store: Phys0Store;
   readonly bridge: PythonBridge;
   readonly audio: AudioService;
   readonly assetRegistry: AssetRegistry;
@@ -85,7 +85,7 @@ export class Chem0Backend extends EventEmitter {
   constructor(readonly repoRoot: string, dataDir = path.join(repoRoot, "data")) {
     super();
     this.loadEnv();
-    this.store = new Chem0Store(repoRoot, dataDir);
+    this.store = new Phys0Store(repoRoot, dataDir);
     this.audio = new AudioService(dataDir);
     this.bridge = new PythonBridge(repoRoot);
     this.assetRegistry = new AssetRegistry(repoRoot);
@@ -602,7 +602,7 @@ export class Chem0Backend extends EventEmitter {
     try {
       let text = "";
       const instructions =
-        "You are controlling a local LeRobot experiment through chem-0. Your agent session is scoped to one world through the experiment; do not ask the user for world_id or pass world_id to tools unless explicitly changing world management. Use tools when hardware state, camera state, arm motion, or human voice interaction is required. Use speak_to_human to talk out loud. Treat listen_to_human transcripts as human messages. When you observe a universal-indicator color in a camera frame, estimate the pH and call record_ph(value) so the operator's real-time chart updates. Keep motions conservative and prefer known pose-table references.";
+        "You are controlling a local LeRobot experiment through phys-0. Your agent session is scoped to one world through the experiment; do not ask the user for world_id or pass world_id to tools unless explicitly changing world management. Use tools when hardware state, camera state, arm motion, or human voice interaction is required. Use speak_to_human to talk out loud. Treat listen_to_human transcripts as human messages. When you observe a universal-indicator color in a camera frame, estimate the pH and call record_ph(value) so the operator's real-time chart updates. Keep motions conservative and prefer known pose-table references.";
       let nextInput: unknown = this.sessionMessages(input.experimentId, sessionId);
       let previousResponseId: string | undefined;
       const tools = await this.openAiTools();

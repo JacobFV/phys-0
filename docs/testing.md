@@ -3,7 +3,7 @@
 ## Syntax And Build
 
 ```sh
-PYTHONPATH=src/lib .venv/bin/python -m py_compile src/apps/python-bridge/bridge.py src/lib/chem0/core.py
+PYTHONPATH=src/lib .venv/bin/python -m py_compile src/apps/python-bridge/bridge.py src/lib/phys0/core.py
 npm run build
 npm audit --omit=dev
 ```
@@ -222,7 +222,7 @@ This verifies that the repo-local URDF and `placo` solver import correctly:
 
 ```sh
 PYTHONPATH=src/lib .venv/bin/python - <<'PY'
-from chem0.core import forward_kinematics_for_pose, validate_pose
+from phys0.core import forward_kinematics_for_pose, validate_pose
 
 pose = validate_pose({
     "shoulder_pan": 0,

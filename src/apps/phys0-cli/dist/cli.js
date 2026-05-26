@@ -5,7 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const node_path_1 = __importDefault(require("node:path"));
-const backend_1 = require("@chem0/backend");
+const backend_1 = require("@phys0/backend");
 const repoRoot = node_path_1.default.resolve(__dirname, "../../../..");
 function parse(argv) {
     const positional = [];
@@ -51,7 +51,7 @@ function parsePose(flags) {
 async function main() {
     const parsed = parse(process.argv.slice(2));
     const [scope, action, arg] = parsed.positional;
-    const backend = new backend_1.Chem0Backend(repoRoot);
+    const backend = new backend_1.Phys0Backend(repoRoot);
     await backend.init();
     try {
         if (!scope || scope === "help" || parsed.flags.help) {

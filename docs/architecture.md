@@ -1,6 +1,6 @@
 # Architecture
 
-`chem-0` is now centered on one shared TypeScript Node backend. The stdio MCP
+`phys-0` is now centered on one shared TypeScript Node backend. The stdio MCP
 server and the Electron GUI are clients of that backend; neither owns robot
 state, experiment state, persistence, or agent streaming independently.
 
@@ -14,7 +14,7 @@ state, experiment state, persistence, or agent streaming independently.
 - World-scoped robot selection, so multiple physical labs and virtual benches
   can coexist without requiring the agent to pass `world_id` on every tool
   call.
-- Local-first persistence: `data/chem0.sqlite` plus `data/blobs` beside it.
+- Local-first persistence: `data/phys0.sqlite` plus `data/blobs` beside it.
 - MCP compatibility while accepting that MCP clients do not expose their full
   chat transcript to the server. MCP tools therefore accept `experiment_id` so
   tool calls and responses can still be attributed.
@@ -31,15 +31,15 @@ state, experiment state, persistence, or agent streaming independently.
 ```mermaid
 flowchart LR
     agent["MCP Client / LLM Agent<br/>Codex, Claude, Gemini, etc."]
-    desktop["Chem-0 Lab Console<br/><code>src/apps/electron</code>"]
+    desktop["Phys-0 Lab Console<br/><code>src/apps/electron</code>"]
     mcp["Node stdio MCP Server<br/><code>src/apps/mcp-node</code>"]
-    backend["Shared Node Backend<br/><code>@chem0/backend</code>"]
-    db["SQLite Experiment Store<br/><code>data/chem0.sqlite</code>"]
+    backend["Shared Node Backend<br/><code>@phys0/backend</code>"]
+    db["SQLite Experiment Store<br/><code>data/phys0.sqlite</code>"]
     blobs["Blob Store<br/><code>data/blobs</code>"]
     openai["OpenAI Responses API<br/><code>gpt-5.5</code>"]
     audio["Voice I/O<br/><code>speak_to_human</code><br/><code>listen_to_human</code>"]
     bridge["Python Bridge<br/><code>src/apps/python-bridge</code>"]
-    core["Python Core<br/><code>src/lib/chem0</code>"]
+    core["Python Core<br/><code>src/lib/phys0</code>"]
     pose["Pose Table Resource<br/><code>lerobot://pose-table</code>"]
     ik["SO-101 FK / IK<br/><code>placo</code> + URDF"]
     safety["Validation + Step Interpolation<br/>joint limits, workspace, max_step"]
@@ -125,9 +125,9 @@ flowchart TB
 
 ## Data Flow
 
-1. Electron starts `@chem0/backend` in the Electron main process, or an MCP
+1. Electron starts `@phys0/backend` in the Electron main process, or an MCP
    client starts `src/apps/mcp-node/dist/server.js` over stdio.
-2. The Node backend initializes `data/chem0.sqlite`, `data/blobs`, and the
+2. The Node backend initializes `data/phys0.sqlite`, `data/blobs`, and the
    persistent Python bridge process.
 3. Electron-created sessions stream GPT-5.5 responses and backend tool-loop
    events into the GUI while appending each event to SQLite.
@@ -136,7 +136,7 @@ flowchart TB
 5. The backend resolves omitted `robot_id` values from the experiment's world
    default robot. Agents normally pass `experiment_id`, not `world_id`.
 6. Hardware calls are forwarded to the Python bridge, which dispatches to
-   `src/lib/chem0/core.py`.
+   `src/lib/phys0/core.py`.
 7. Voice tools can speak through ElevenLabs or macOS system speech and can
    transcribe Electron microphone clips or MCP-provided audio files.
 8. Image responses from tools such as `view_camera` are copied into the blob

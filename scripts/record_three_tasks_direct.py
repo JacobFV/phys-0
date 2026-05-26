@@ -48,7 +48,7 @@ def main():
     from lerobot.utils.feature_utils import combine_feature_dicts
 
     for task in TASKS:
-        repo_id = f"{HF_USER}/chem0-{task}"
+        repo_id = f"{HF_USER}/phys0-{task}"
         print(f"\n=== Recording {NUM_EPISODES} episodes of '{task}' -> {repo_id} ===")
 
         # Connect follower
