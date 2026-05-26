@@ -15,7 +15,7 @@ declare global {
       listEvents: (experimentId: string) => Promise<JsonObject>;
       listArtifacts: (experimentId: string) => Promise<JsonObject>;
       sendAgentMessage: (input: JsonObject) => Promise<JsonObject>;
-      openCalibrationWindow: () => Promise<JsonObject>;
+      openCalibrationWindow: (robotId: string, port: string) => Promise<JsonObject>;
       openRecordWindow: () => Promise<JsonObject>;
       openTrainWindow: () => Promise<JsonObject>;
       openReplayWindow: () => Promise<JsonObject>;
@@ -1440,7 +1440,20 @@ async function refreshRobots(): Promise<void> {
       sub.className = "sub";
       const worldName = worldsCache.find((world) => String(world.id) === assignedWorldId)?.name ?? assignedWorldId;
       sub.textContent = `${String(robot.port ?? "?")} · ${robot.looks_like_so101 ? "so101" : "unknown"} · ${String(worldName)}`;
-      li.append(title, sub);
+      const actions = document.createElement("div");
+      actions.className = "list-item-actions";
+      const calibrateBtn = document.createElement("button");
+      calibrateBtn.type = "button";
+      calibrateBtn.className = "ghost mini";
+      calibrateBtn.textContent = "Calibrate";
+      const portStr = typeof robot.port === "string" ? robot.port : "";
+      calibrateBtn.disabled = !portStr;
+      calibrateBtn.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        show(await window.phys0.openCalibrationWindow(robotId, portStr));
+      });
+      actions.append(calibrateBtn);
+      li.append(title, sub, actions);
       li.addEventListener("click", () => {
         defaultRobotInput.value = robotId;
         void assignRobotToSelectedWorld(robot, true);
@@ -2014,7 +2027,6 @@ refreshArtifactsBtn.addEventListener("click", () => void refreshArtifacts());
 document.querySelector("#open-record")?.addEventListener("click", async () => show(await window.phys0.openRecordWindow()));
 document.querySelector("#open-train")?.addEventListener("click", async () => show(await window.phys0.openTrainWindow()));
 document.querySelector("#open-replay")?.addEventListener("click", async () => show(await window.phys0.openReplayWindow()));
-document.querySelector("#open-calibration")?.addEventListener("click", async () => show(await window.phys0.openCalibrationWindow()));
 openSettingsBtn.addEventListener("click", async () => show(await window.phys0.openSettingsWindow()));
 setDefaultRobot.addEventListener("click", async () => {
   const robotId = defaultRobotInput.value.trim();

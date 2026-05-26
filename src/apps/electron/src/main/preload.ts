@@ -15,7 +15,8 @@ contextBridge.exposeInMainWorld("phys0", {
   listArtifacts: (experimentId: string) => ipcRenderer.invoke("phys0:list-artifacts", experimentId),
   sendAgentMessage: (input: JsonObject) => ipcRenderer.invoke("phys0:agent-message", input),
   readJsonFile: (filePath: string) => ipcRenderer.invoke("phys0:read-json-file", filePath),
-  openCalibrationWindow: () => ipcRenderer.invoke("phys0:open-calibration-window"),
+  openCalibrationWindow: (robotId: string, port: string) =>
+    ipcRenderer.invoke("phys0:open-calibration-window", { robotId, port }),
   openRecordWindow: () => ipcRenderer.invoke("phys0:open-record-window"),
   openTrainWindow: () => ipcRenderer.invoke("phys0:open-train-window"),
   openReplayWindow: () => ipcRenderer.invoke("phys0:open-replay-window"),

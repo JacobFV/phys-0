@@ -175,13 +175,13 @@ function createVirtualWorldWindow(worldId: string): void {
   });
 }
 
-function createCalibrationWindow(): void {
+function createCalibrationWindow(opts: { robotId: string; port: string }): void {
   const win = new BrowserWindow({
     width: 1040,
     height: 760,
     minWidth: 900,
     minHeight: 640,
-    title: `${APP_NAME} Calibration`,
+    title: `${APP_NAME} Calibration · ${opts.robotId}`,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -191,7 +191,8 @@ function createCalibrationWindow(): void {
   });
   windows.add(win);
   win.on("closed", () => windows.delete(win));
-  void win.loadFile(path.join(__dirname, "../renderer/calibration.html"));
+  const search = `robot_id=${encodeURIComponent(opts.robotId)}&port=${encodeURIComponent(opts.port)}`;
+  void win.loadFile(path.join(__dirname, "../renderer/calibration.html"), { search });
 }
 
 type WorkbenchTab = "record" | "train" | "replay";
@@ -295,8 +296,10 @@ ipcMain.handle("phys0:agent-message", async (_event, input: JsonObject) => {
   });
   return { accepted: true };
 });
-ipcMain.handle("phys0:open-calibration-window", async () => {
-  createCalibrationWindow();
+ipcMain.handle("phys0:open-calibration-window", async (_event, payload: JsonObject) => {
+  const robotId = typeof payload?.robotId === "string" && payload.robotId.trim() ? payload.robotId.trim() : "mcp_so101";
+  const port = typeof payload?.port === "string" ? payload.port : "";
+  createCalibrationWindow({ robotId, port });
   return { opened: true };
 });
 

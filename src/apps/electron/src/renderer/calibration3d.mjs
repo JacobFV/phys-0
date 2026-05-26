@@ -51,7 +51,9 @@ const GUIDE_SECOND_TARGETS = {
   gripper: 557
 };
 
-const robotSelect = document.querySelector("#calibration-robot");
+const calibrationParams = new URLSearchParams(window.location.search);
+const PRESELECTED_PORT = (calibrationParams.get("port") ?? "").trim();
+const PRESELECTED_ROBOT_ID = (calibrationParams.get("robot_id") ?? "").trim();
 const startOverlay = document.querySelector("#start-overlay");
 const startButton = document.querySelector("#start-button");
 const startStatus = document.querySelector("#start-status");
@@ -188,15 +190,12 @@ function currentStep() { return steps[stepIndex]; }
 function currentEndpointKey() { return endpointIndex === 0 ? "first" : "second"; }
 
 function selectedPort() {
-  return robotSelect.selectedOptions[0]?.value?.trim() ?? "";
+  return PRESELECTED_PORT;
 }
 
 function selectedRobotId() {
-  const opt = robotSelect.selectedOptions[0];
-  const suggested = opt?.dataset.robotId;
-  if (suggested) return suggested;
-  const port = selectedPort();
-  const tail = port.split(/[^A-Za-z0-9]+/).filter(Boolean).pop() ?? "b";
+  if (PRESELECTED_ROBOT_ID) return PRESELECTED_ROBOT_ID;
+  const tail = PRESELECTED_PORT.split(/[^A-Za-z0-9]+/).filter(Boolean).pop() ?? "b";
   return `mcp_so101_${tail.toLowerCase()}`;
 }
 
@@ -305,9 +304,16 @@ function setRobotPose(robot, angleFor) {
   }
 }
 
+function readThemeBg() {
+  const css = getComputedStyle(document.documentElement).getPropertyValue("--bg-0").trim();
+  try { return new THREE.Color(css || "#000000"); } catch { return new THREE.Color(0x000000); }
+}
+
 async function initScene() {
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x000000);
+  scene.background = readThemeBg();
+  const themeObserver = new MutationObserver(() => { scene.background = readThemeBg(); });
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
   camera = new THREE.PerspectiveCamera(38, 1, 0.01, 100);
   updateOrbitCamera();
   renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
@@ -476,38 +482,15 @@ function advance() {
   renderStep();
 }
 
-async function refreshRobots() {
-  robotSelect.replaceChildren();
-  startStatus.textContent = "Scanning for arms…";
-  startButton.disabled = true;
-  try {
-    const parsed = parseToolJson(await window.phys0.callTool("list_connected_robots", { max_id: 12 }));
-    const robots = Array.isArray(parsed.robots) ? parsed.robots : [];
-    robotSelect.replaceChildren();
-    for (const robot of robots) {
-      const option = document.createElement("option");
-      const port = String(robot.port ?? "");
-      const ids = Array.isArray(robot.servo_ids) ? robot.servo_ids.join(",") : "";
-      option.value = port;
-      option.textContent = `${port.replace(/^\/dev\/tty\./, "")} · IDs ${ids || "none"}`;
-      if (typeof robot.suggested_robot_id === "string") option.dataset.robotId = robot.suggested_robot_id;
-      robotSelect.append(option);
-    }
-    if (robots.length === 0) {
-      startStatus.textContent = "No arms detected. Connect one and try again.";
-      const option = document.createElement("option");
-      option.textContent = "—";
-      robotSelect.append(option);
-      startButton.disabled = true;
-    } else {
-      startStatus.textContent = `${robots.length} arm${robots.length === 1 ? "" : "s"} detected`;
-      startButton.disabled = false;
-      startLivePolling();
-    }
-  } catch (error) {
-    startStatus.textContent = error instanceof Error ? error.message : String(error);
+async function initSelectedArm() {
+  if (!PRESELECTED_PORT) {
+    startStatus.textContent = "No port supplied. Reopen calibration from an arm.";
     startButton.disabled = true;
+    return;
   }
+  startStatus.textContent = `Ready · ${selectedRobotId()} · ${PRESELECTED_PORT.replace(/^\/dev\/tty\./, "")}`;
+  startButton.disabled = false;
+  startLivePolling();
 }
 
 async function pollLivePositions() {
@@ -646,13 +629,13 @@ async function doFinish() {
     const errMsg = toolErrorMessage(result);
     if (errMsg) return errMsg;
     mode = "done";
+    window.setTimeout(() => window.close(), 600);
     return null;
   } catch (error) {
     return error instanceof Error ? error.message : String(error);
   }
 }
 
-robotSelect.addEventListener("change", () => { startLivePolling(); });
 startButton.addEventListener("click", openConfirm);
 confirmCancelButton.addEventListener("click", cancelConfirm);
 confirmStartButton.addEventListener("click", () => void handleStart());
@@ -667,4 +650,4 @@ window.addEventListener("beforeunload", () => {
 
 renderStep();
 void loadRobotModel().catch(failLoudly);
-void refreshRobots();
+void initSelectedArm();
