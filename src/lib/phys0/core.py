@@ -6,6 +6,7 @@ from __future__ import annotations
 import glob
 import json
 import base64
+import os
 import sys
 import threading
 import time
@@ -1194,11 +1195,21 @@ def list_connected_robots(args: dict[str, Any]) -> dict[str, Any]:
     from lerobot.motors.feetech import FeetechMotorsBus
 
     max_id = int(args.get("max_id", 12))
-    ports = sorted(set(glob.glob("/dev/tty.usb*") + glob.glob("/dev/tty.wch*") + glob.glob("/dev/cu.usb*") + glob.glob("/dev/cu.wch*")))
+    ports = sorted(
+        set(
+            glob.glob("/dev/tty.usb*")
+            + glob.glob("/dev/tty.wch*")
+            + glob.glob("/dev/cu.usb*")
+            + glob.glob("/dev/cu.wch*")
+            + glob.glob("/dev/ttyACM*")
+            + glob.glob("/dev/ttyUSB*")
+            + glob.glob("/dev/serial/by-id/*")
+        )
+    )
     robots = []
     seen_devices: set[str] = set()
     for port in ports:
-        canonical = port.replace("/dev/cu.", "/dev/tty.")
+        canonical = os.path.realpath(port).replace("/dev/cu.", "/dev/tty.")
         if canonical in seen_devices:
             continue
         seen_devices.add(canonical)
