@@ -58,9 +58,10 @@ src/apps/electron/        Phys-0 Lab Console desktop app
 scripts/                  Setup, dependency, and deterministic calibration scripts
 assets/                   Welcome image and SO-101 kinematic URDF
 docs/                     Detailed setup, operations, testing, and references
-AGENTS.md                 Agent handoff and operating instructions
-GEMINI.md                 Same as AGENTS.md
-CLAUDE.md                 Same as AGENTS.md
+docs/agent-handoff.md     Shared agent handoff and operating instructions
+AGENTS.md                 Thin pointer to docs/agent-handoff.md
+GEMINI.md                 Thin pointer to docs/agent-handoff.md
+CLAUDE.md                 Thin pointer to docs/agent-handoff.md
 ```
 
 ## System Diagram

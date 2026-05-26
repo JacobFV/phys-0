@@ -2,7 +2,8 @@ import * as THREE from "three";
 import { STLLoader } from "./vendor/STLLoader.js";
 
 const JOINTS = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"];
-const CAPTURE_INTERVAL_MS = 100;
+const STATUS_POLL_INTERVAL_MS = 250;
+const params = new URLSearchParams(window.location.search);
 
 const viewerLeader = document.querySelector("#record-3d-leader");
 const viewerFollower = document.querySelector("#record-3d-follower");
@@ -33,7 +34,7 @@ let rendererLeader, rendererFollower;
 let modelLeader, modelFollower;
 let livePositions = { leader: {}, follower: {} };
 let pollTimer = null;
-let captureTimer = null;
+let statusTimer = null;
 let animationFrame = null;
 
 let mode = "prepare";
@@ -43,7 +44,8 @@ let recording = false;
 let currentEpisode = 0;
 let targetCount = 5;
 let taskName = "pick-and-pour";
-let capturedCount = 0;
+let recordedFrameCount = 0;
+let recordTabActive = (params.get("tab") ?? "record").toLowerCase() === "record";
 
 const orbits = {
   leader: { target: new THREE.Vector3(0, 0, 0.16), radius: 3.25, theta: -0.84, phi: 1.12, dragging: false, lastX: 0, lastY: 0 },
@@ -316,6 +318,7 @@ async function pollDuoPositions() {
 }
 
 async function refreshArms() {
+  if (!recordTabActive) return;
   leaderSelect.replaceChildren();
   followerSelect.replaceChildren();
   startStatus.textContent = "Scanning for arms…";
@@ -348,15 +351,21 @@ async function refreshArms() {
 }
 
 function startPolling() {
+  if (!recordTabActive || sessionId) return;
   if (pollTimer) clearInterval(pollTimer);
   void pollDuoPositions();
   pollTimer = setInterval(() => void pollDuoPositions(), 700);
 }
 
+function stopDuoPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+
 function renderRecordUI() {
   taskLabel.textContent = taskName;
-  episodeCounter.textContent = `Episode ${currentEpisode + 1} / ${targetCount}`;
-  frameCounter.textContent = recording ? `${capturedCount} frames` : "ready";
+  const displayEpisode = Math.min(currentEpisode + 1, targetCount);
+  episodeCounter.textContent = `Episode ${displayEpisode} / ${targetCount}`;
+  frameCounter.textContent = recording ? `${recordedFrameCount} frames` : "ready";
   if (recording) {
     recordStatus.textContent = "RECORDING";
     recButton.textContent = "STOP";
@@ -367,26 +376,31 @@ function renderRecordUI() {
   }
 }
 
-async function captureFrame() {
+async function pollSessionStatus() {
   if (!sessionId) return;
   try {
-    const result = await window.phys0.callTool("capture_lerobot_frame", { session_id: sessionId });
-    if (!result?.isError) {
-      capturedCount += 1;
-      frameCounter.textContent = `${capturedCount} frames`;
-    }
-  } catch {}
+    const result = await window.phys0.callTool("get_session_status", { session_id: sessionId });
+    if (result?.isError) throw new Error(textFromTool(result));
+    const parsed = parseToolJson(result);
+    recordedFrameCount = Number(parsed.frame_count ?? 0);
+    currentEpisode = Number(parsed.episode_count ?? currentEpisode);
+    recording = Boolean(parsed.recording);
+    renderRecordUI();
+    showError("");
+  } catch (error) {
+    showError(error instanceof Error ? error.message : String(error));
+  }
 }
 
-async function startCaptureLoop() {
-  if (captureTimer) clearInterval(captureTimer);
-  capturedCount = 0;
-  await captureFrame();
-  captureTimer = setInterval(() => void captureFrame(), CAPTURE_INTERVAL_MS);
+async function startStatusPolling() {
+  if (statusTimer) clearInterval(statusTimer);
+  recordedFrameCount = 0;
+  await pollSessionStatus();
+  statusTimer = setInterval(() => void pollSessionStatus(), STATUS_POLL_INTERVAL_MS);
 }
 
-function stopCaptureLoop() {
-  if (captureTimer) { clearInterval(captureTimer); captureTimer = null; }
+function stopStatusPolling() {
+  if (statusTimer) { clearInterval(statusTimer); statusTimer = null; }
 }
 
 async function handleStartSession() {
@@ -404,6 +418,7 @@ async function handleStartSession() {
     taskName = taskSelect.value;
     targetCount = parseInt(targetEpisodes.value, 10) || 5;
 
+    stopDuoPolling();
     const result = await window.phys0.callTool("start_lerobot_session", {
       leader_port: lPort,
       follower_port: fPort,
@@ -417,6 +432,7 @@ async function handleStartSession() {
     if (!sessionId) throw new Error("No session_id returned.");
 
     currentEpisode = 0;
+    recordedFrameCount = 0;
     mode = "record";
     showOverlay("record");
     renderRecordUI();
@@ -434,11 +450,17 @@ async function handleRecordButton() {
     // Start new episode
     busy = true;
     try {
-      await window.phys0.callTool("start_lerobot_episode", { session_id: sessionId });
+      const result = await window.phys0.callTool("start_lerobot_episode", { session_id: sessionId });
+      if (result?.isError) throw new Error(textFromTool(result));
       recording = true;
       recButton.disabled = true;
-      await startCaptureLoop();
+      await startStatusPolling();
       renderRecordUI();
+      showError("");
+    } catch (error) {
+      recording = false;
+      stopStatusPolling();
+      showError(error instanceof Error ? error.message : String(error));
     } finally {
       recButton.disabled = false;
       busy = false;
@@ -450,12 +472,16 @@ async function handleRecordButton() {
       recording = false;
       recButton.disabled = true;
       recButton.textContent = "SAVING…";
-      stopCaptureLoop();
+      stopStatusPolling();
       const result = await window.phys0.callTool("save_lerobot_episode", { session_id: sessionId });
-      if (!result?.isError) {
-        currentEpisode += 1;
-      }
+      if (result?.isError) throw new Error(textFromTool(result));
+      const parsed = parseToolJson(result);
+      currentEpisode = Number(parsed.num_episodes ?? currentEpisode + 1);
+      recordedFrameCount = Number(parsed.frame_count ?? recordedFrameCount);
       renderRecordUI();
+      showError("");
+    } catch (error) {
+      showError(error instanceof Error ? error.message : String(error));
     } finally {
       recButton.disabled = false;
       busy = false;
@@ -467,7 +493,7 @@ async function handleStopSession() {
   if (busy) return;
   busy = true;
   try {
-    stopCaptureLoop();
+    stopStatusPolling();
     recording = false;
     await window.phys0.callTool("stop_lerobot_session", { session_id: sessionId });
     sessionId = "";
@@ -492,10 +518,20 @@ recButton.addEventListener("click", () => void handleRecordButton());
 stopSessionButton.addEventListener("click", () => void handleStopSession());
 closeButton.addEventListener("click", () => window.close());
 
+window.addEventListener("phys0:workbench-tab-changed", (event) => {
+  const tab = event instanceof CustomEvent ? String(event.detail?.tab ?? "") : "";
+  recordTabActive = tab === "record";
+  if (recordTabActive) {
+    if (!sessionId) void refreshArms();
+  } else {
+    stopDuoPolling();
+  }
+});
+
 window.addEventListener("beforeunload", () => {
   if (sessionId) window.phys0.callTool("stop_lerobot_session", { session_id: sessionId }).catch(() => {});
-  if (pollTimer) clearInterval(pollTimer);
-  if (captureTimer) clearInterval(captureTimer);
+  stopDuoPolling();
+  if (statusTimer) clearInterval(statusTimer);
   if (animationFrame) cancelAnimationFrame(animationFrame);
   if (rendererLeader) rendererLeader.dispose();
   if (rendererFollower) rendererFollower.dispose();
@@ -505,4 +541,4 @@ showOverlay("start");
 void initScene().catch((error) => {
   startStatus.textContent = `3D failed: ${error instanceof Error ? error.message : String(error)}`;
 });
-void refreshArms();
+if (recordTabActive) void refreshArms();

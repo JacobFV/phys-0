@@ -1708,13 +1708,18 @@ def _session_loop(
 
         if events.get("save_requested"):
             events["save_requested"] = False
+            frame_count = int(events.get("frame_count", 0))
             try:
                 dataset.save_episode()
+                events["last_saved_frame_count"] = frame_count
                 events["frame_count"] = 0
                 events["episode_just_saved"] = True
-            except Exception:
-                pass
+                events["save_error"] = ""
+            except Exception as exc:
+                events["episode_just_saved"] = False
+                events["save_error"] = str(exc)
             events["episode_active"] = False
+            events["save_completed"] = True
 
         try:
             obs = robot.get_observation()
@@ -1819,7 +1824,10 @@ def start_lerobot_session(args: dict[str, Any]) -> dict[str, Any]:
             "stop_recording": False,
             "episode_active": False,
             "save_requested": False,
+            "save_completed": False,
             "frame_count": 0,
+            "last_saved_frame_count": 0,
+            "save_error": "",
             "episode_just_saved": False,
         }
 
@@ -1883,6 +1891,10 @@ def start_lerobot_episode(args: dict[str, Any]) -> dict[str, Any]:
         session["dataset"].clear_episode_buffer()
         session["events"]["episode_active"] = True
         session["events"]["frame_count"] = 0
+        session["events"]["last_saved_frame_count"] = 0
+        session["events"]["save_error"] = ""
+        session["events"]["save_completed"] = False
+        session["events"]["episode_just_saved"] = False
         return _tool_json({"session_id": session_id, "episode_started": True})
     except Exception as exc:
         return _tool_error(f"Failed to start episode: {exc}")
@@ -1894,20 +1906,30 @@ def save_lerobot_episode(args: dict[str, Any]) -> dict[str, Any]:
     if not session:
         return _tool_error(f"Session not found: {session_id}")
     try:
+        session["events"]["save_completed"] = False
+        session["events"]["save_error"] = ""
+        session["events"]["episode_just_saved"] = False
         session["events"]["save_requested"] = True
         timeout = 10.0
         start_t = time.perf_counter()
-        while not session["events"].get("episode_just_saved") and not session["events"]["stop_recording"]:
+        while not session["events"].get("save_completed") and not session["events"]["stop_recording"]:
             if time.perf_counter() - start_t > timeout:
                 break
             time.sleep(0.05)
-        just_saved = session["events"].pop("episode_just_saved", False)
+        if not session["events"].get("save_completed"):
+            return _tool_error("Timed out while saving episode.")
+        save_error = str(session["events"].get("save_error") or "")
+        if save_error:
+            return _tool_error(f"Failed to save episode: {save_error}")
+        just_saved = bool(session["events"].get("episode_just_saved", False))
+        if not just_saved:
+            return _tool_error("Episode save did not complete.")
         session["episode_count"] += 1
         return _tool_json({
             "session_id": session_id,
             "episode_saved": just_saved,
             "num_episodes": session["episode_count"],
-            "frame_count": session["events"]["frame_count"],
+            "frame_count": session["events"].get("last_saved_frame_count", 0),
         })
     except Exception as exc:
         return _tool_error(f"Failed to save episode: {exc}")

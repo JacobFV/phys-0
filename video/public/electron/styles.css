@@ -1787,14 +1787,15 @@ body.workbench-detached .appbar-group.left .tab-btn { border-right: none; }
 .round-btn--send:hover { background: var(--accent); filter: brightness(1.08); }
 
 .round-btn--record {
-  background: var(--bg-2);
-  color: var(--danger);
-  border-color: var(--border-2);
+  background: transparent;
+  color: var(--text-3);
+  border-color: transparent;
 }
 .round-btn--record:hover {
-  background: var(--bg-hover);
-  color: var(--danger);
-  border-color: var(--danger);
+  background: transparent;
+  color: var(--text-2);
+  border-color: transparent;
+  filter: brightness(1.12);
 }
 
 .round-btn .round-btn-icon { display: none; }
@@ -1809,11 +1810,12 @@ body.workbench-detached .appbar-group.left .tab-btn { border-right: none; }
 
 .round-btn--record .round-btn-icon--record { display: block; }
 .round-btn--record.recording {
-  background: var(--danger);
-  color: #1a0000;
-  border-color: var(--danger);
+  background: transparent;
+  color: var(--danger);
+  border-color: transparent;
   animation: round-pulse 1.2s ease-in-out infinite;
 }
+.round-btn--record.recording:hover { color: var(--danger); }
 .round-btn--record.recording .round-btn-icon--record { display: none; }
 .round-btn--record.recording .round-btn-icon--stop { display: block; }
 

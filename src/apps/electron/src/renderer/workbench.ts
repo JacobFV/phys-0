@@ -31,6 +31,7 @@ const tabBinding = window.Phys0Shell.bindPaneTabs({
     currentTab = tab;
     if (statusTextEl) statusTextEl.textContent = tab;
     if (statusPillEl) statusPillEl.classList.toggle("active", true);
+    window.dispatchEvent(new CustomEvent("phys0:workbench-tab-changed", { detail: { tab } }));
   },
   validate: isTab
 });

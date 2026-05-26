@@ -329,6 +329,12 @@ Read-only servo bus probe. Does not move motors.
 ```
 
 Expected working result includes IDs `1..6`, model `777`, baud `1000000`.
+If a wiring or power change was just made, do not connect or move until this
+probe returns all six IDs consistently.
+
+For newly assembled Arm B servos, assign unique IDs with
+`scripts/set_feetech_id.py` while exactly one physical servo is connected to
+the bus. Duplicate IDs on the same bus cannot be addressed independently.
 
 ### `list_connected_robots`
 

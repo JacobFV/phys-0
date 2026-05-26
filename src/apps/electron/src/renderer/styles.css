@@ -595,24 +595,31 @@ pre {
 }
 
 .composer {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 8px;
+  position: relative;
+  display: block;
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid var(--border-1);
 }
 
-.composer textarea { min-height: 72px; }
-
-.composer-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  align-self: stretch;
+.composer textarea {
+  min-height: 72px;
+  width: 100%;
+  padding-right: 60px;
+  box-sizing: border-box;
 }
 
-.composer-actions button { min-width: 90px; }
+.composer-actions {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  display: flex;
+  flex-direction: row;
+  gap: 4px;
+  align-items: center;
+}
+
+.composer-actions button { min-width: 0; }
 
 .calibration-immersive {
   position: relative;
@@ -2494,10 +2501,10 @@ body.workbench-detached .appbar-group.left .tab-btn { border-right: none; }
 .composer-actions button.round-btn { min-width: 0; }
 
 .round-btn {
-  width: 34px;
-  height: 34px;
-  min-width: 34px;
-  min-height: 34px;
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  min-height: 20px;
   padding: 0;
   border-radius: 999px;
   border: 1px solid var(--border-2);
@@ -2530,17 +2537,18 @@ body.workbench-detached .appbar-group.left .tab-btn { border-right: none; }
 .round-btn--send:hover { background: var(--accent); filter: brightness(1.08); }
 
 .round-btn--record {
-  background: var(--bg-2);
-  color: var(--danger);
-  border-color: var(--border-2);
+  background: transparent;
+  color: var(--text-3);
+  border-color: transparent;
 }
 .round-btn--record:hover {
-  background: var(--bg-hover);
-  color: var(--danger);
-  border-color: var(--danger);
+  background: transparent;
+  color: var(--text-2);
+  border-color: transparent;
+  filter: brightness(1.12);
 }
 
-.round-btn .round-btn-icon { display: none; }
+.round-btn .round-btn-icon { display: none; width: 11px; height: 11px; }
 .round-btn--send .round-btn-icon--send { display: block; }
 .round-btn--send.in-flight {
   background: var(--bg-2);
@@ -2552,11 +2560,12 @@ body.workbench-detached .appbar-group.left .tab-btn { border-right: none; }
 
 .round-btn--record .round-btn-icon--record { display: block; }
 .round-btn--record.recording {
-  background: var(--danger);
-  color: #1a0000;
-  border-color: var(--danger);
+  background: transparent;
+  color: var(--danger);
+  border-color: transparent;
   animation: round-pulse 1.2s ease-in-out infinite;
 }
+.round-btn--record.recording:hover { color: var(--danger); }
 .round-btn--record.recording .round-btn-icon--record { display: none; }
 .round-btn--record.recording .round-btn-icon--stop { display: block; }
 

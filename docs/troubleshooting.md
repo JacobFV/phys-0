@@ -17,6 +17,8 @@ Likely causes:
 - servo bus cable is on the wrong channel,
 - board jumper/channel is wrong,
 - cable polarity is wrong,
+- servo power is routed through chained power expanders causing voltage drop or
+  intermittent contact,
 - another process has the serial port open.
 
 Fix:
@@ -24,8 +26,13 @@ Fix:
 1. Power-cycle the servo board.
 2. Unplug and replug USB-C.
 3. Verify external servo power.
-4. Verify the servo bus cable and jumper/channel.
-5. Run `probe_feetech` again before connecting.
+4. Plug the servo power supply path directly into the wall or one known-good
+   strip; do not chain power expanders.
+5. Verify the servo bus cable and jumper/channel.
+6. Run `probe_feetech` again before connecting.
+
+If only a suffix of IDs responds, such as `5` and `6`, treat the bus as
+untrusted until a clean non-motion probe sees IDs `1..6`, model `777`.
 
 ## Intermittent Status Packet Failures
 

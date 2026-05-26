@@ -17,6 +17,11 @@ Known working setup:
 - Board jumpers/channel configured so USB controls the servo bus.
 - Local camera available as OpenCV camera index `0`.
 
+Power note: do not run the servo power path through chained power expanders.
+A confirmed unstable setup used a power expander plugged into a second power
+expander; only servo IDs `5` and `6` responded. Plugging the expander directly
+into the wall restored all six IDs.
+
 Known tested defaults:
 
 ```text
@@ -37,6 +42,40 @@ Do not delete it unless recalibrating the physical arm.
 
 For a second arm or a newly assembled arm, use a new `robot_id` and create a
 separate calibration file instead of overwriting `mcp_so101.json`.
+
+Assume a normal SO-101 servo ID order of `1,2,3,4,5,6` unless a specific arm is
+documented otherwise. Arm A and Arm B are both currently documented with this
+physical joint order:
+
+| Servo ID | Physical joint |
+| --- | --- |
+| `2` | base roll / `shoulder_pan` |
+| `1` | base pitch / `shoulder_lift` |
+| `3` | elbow |
+| `4` | wrist pitch / `wrist_flex` |
+| `5` | wrist roll |
+| `6` | gripper |
+
+Verify the physical base joint ID order during calibration instead of relying
+only on default SO-101 assumptions.
+
+Physical arms are not uniquely identified by the servos themselves in this
+repo. Runtime identity is by detected Unix serial port plus assigned
+`robot_id`; calibration files are keyed by `robot_id`. If adapters or arms are
+swapped between ports, verify the arm identity before connecting or moving.
+
+For Arm B, assign unique Feetech IDs before calibration. Connect only one servo
+to the bus at a time, then run:
+
+```sh
+PYTHONPATH=src/lib .venv/bin/python scripts/set_feetech_id.py \
+  --port /dev/ttyACM0 \
+  --target-id 1
+```
+
+Repeat for target IDs `1..6`, reconnecting only the servo being programmed.
+After each write, verify with `probe_feetech` or `list_connected_robots` before
+adding another servo to the bus.
 
 Deterministic endpoint calibration:
 
