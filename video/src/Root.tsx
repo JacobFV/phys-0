@@ -6,6 +6,7 @@ import { fps, W, H } from "./theme";
 // Total duration is the sum of scene durations declared in Main.tsx.
 // Keep in sync with SCENE_LIST there.
 import { TOTAL_FRAMES } from "./scenes/scenes";
+import { Launch, LAUNCH_FRAMES } from "./launch/Launch";
 
 export const Root: React.FC = () => {
   return (
@@ -14,6 +15,14 @@ export const Root: React.FC = () => {
         id="Main"
         component={Main}
         durationInFrames={TOTAL_FRAMES}
+        fps={fps}
+        width={W}
+        height={H}
+      />
+      <Composition
+        id="Launch"
+        component={Launch}
+        durationInFrames={LAUNCH_FRAMES}
         fps={fps}
         width={W}
         height={H}

@@ -2,6 +2,7 @@ import React from "react";
 import { ThreeCanvas } from "@remotion/three";
 import { PerspectiveCamera } from "@react-three/drei";
 import { useCurrentFrame, useVideoConfig } from "remotion";
+import { useThree } from "@react-three/fiber";
 import { Arm, Pose } from "./Arm";
 
 // Two arms sharing one stage: a "ghost" arm pinned at the target pose
@@ -17,7 +18,11 @@ export const CalibrationStage: React.FC<{
   target: Pose;
   // Where the live arm starts.
   start: Pose;
-}> = ({ width, height, target, start }) => {
+  // Optional framing. Without lookAt the camera faces straight down -Z,
+  // which is what the original scenes were composed around.
+  cameraPos?: [number, number, number];
+  lookAt?: [number, number, number];
+}> = ({ width, height, target, start, cameraPos = [0, 3.2, 6.0], lookAt }) => {
   const frame = useCurrentFrame();
   const { durationInFrames } = useVideoConfig();
   // 0..1 over the full scene, with a slight ease so the move is most
@@ -42,7 +47,8 @@ export const CalibrationStage: React.FC<{
       <directionalLight position={[3, 6, 3]} intensity={0.9} />
       <directionalLight position={[-3, 2, -2]} intensity={0.3} color="#f5d76e" />
 
-      <PerspectiveCamera makeDefault position={[0, 3.2, 6.0]} fov={32} near={0.1} far={100} />
+      <PerspectiveCamera makeDefault position={cameraPos} fov={32} near={0.1} far={100} />
+      {lookAt && <LookAt target={lookAt} />}
 
       {/* dark floor + grid */}
       <mesh rotation={[-Math.PI / 2, 0, 0]}>
@@ -97,3 +103,9 @@ const ghostTipPosition = (p: Pose): [number, number, number] => {
 };
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+
+const LookAt: React.FC<{ target: [number, number, number] }> = ({ target }) => {
+  const camera = useThree((st) => st.camera);
+  camera.lookAt(target[0], target[1], target[2]);
+  return null;
+};
