@@ -12,12 +12,13 @@ import {
   useVideoConfig,
 } from "remotion";
 import { palette, type, fps } from "../theme";
-import { CalibrationStage } from "../three/CalibrationStage";
+import { So101Stage } from "../three/So101Stage";
+import type { So101Pose } from "../three/So101";
 
 // The launch cut. Real screen recordings of the Lab Console (recorded on a
 // virtual display, cursor and all), real annotated frames from the vision runs,
-// and the existing procedural SO-101 for the two moments that are animation —
-// which say so on screen.
+// and the SO-101 rendered from the repo's own URDF and CAD meshes for the two
+// moments that are animation, which say so on screen.
 
 const sec = (s: number) => Math.round(s * fps);
 
@@ -33,12 +34,12 @@ const fadeInOut = (frame: number, dur: number) =>
     interpolate(frame, [dur - 10, dur], [1, 0], { extrapolateLeft: "clamp" }),
   );
 
-const Marker: React.FC<{ text: string }> = ({ text }) => (
+const Marker: React.FC<{ text: string; top?: number }> = ({ text, top = 960 }) => (
   <div
     style={{
       position: "absolute",
-      left: 80,
-      top: 60,
+      left: WIN.left,
+      top,
       fontFamily: type.mono,
       fontSize: 18,
       letterSpacing: "0.32em",
@@ -58,11 +59,11 @@ const Line: React.FC<{ children: React.ReactNode; delay?: number }> = ({ childre
     <div
       style={{
         position: "absolute",
-        left: 80,
-        right: 80,
-        bottom: 64,
+        left: WIN.left,
+        right: WIN.left,
+        top: 992,
         fontFamily: type.sans,
-        fontSize: 40,
+        fontSize: 38,
         lineHeight: 1.25,
         color: palette.text1,
         opacity: t,
@@ -78,8 +79,8 @@ const Badge: React.FC<{ text: string }> = ({ text }) => (
   <div
     style={{
       position: "absolute",
-      right: 80,
-      top: 54,
+      right: WIN.left,
+      top: 954,
       fontFamily: type.mono,
       fontSize: 16,
       letterSpacing: "0.2em",
@@ -93,27 +94,26 @@ const Badge: React.FC<{ text: string }> = ({ text }) => (
   </div>
 );
 
-// A recording in a window frame, optionally zoomed into a region.
-const Screen: React.FC<{
-  src: string;
-  startSec: number;
-  rate: number;
-  zoom?: number;
-  origin?: string;
-  top?: number;
-  height?: number;
-}> = ({ src, startSec, rate, zoom = 1, origin = "50% 50%", top = 130, height = 760 }) => {
+// A recording shown whole, never zoomed: the UI under discussion is pointed
+// at with a spotlight (the rest of the window dims) that glides between
+// regions. Regions are in the recording's own 1920x1080 pixels and timed in
+// the recording's own seconds.
+type Region = { at: number; x: number; y: number; w: number; h: number; label?: string };
+const WIN = { left: 160, top: 36, w: 1600, h: 900 };
+const SRC_W = 1920;
+
+const Screen: React.FC<{ src: string; startSec: number; rate: number; regions?: Region[] }> = ({ src, startSec, rate, regions = [] }) => {
   const frame = useCurrentFrame();
-  const z = interpolate(frame, [0, 60], [1, zoom], { extrapolateRight: "clamp", easing: (t) => 1 - Math.pow(1 - t, 3) });
-  const w = Math.round((height * 16) / 9);
+  const t = startSec + (frame / fps) * rate;
+  const k = WIN.w / SRC_W;
   return (
     <div
       style={{
         position: "absolute",
-        top,
-        left: (1920 - w) / 2,
-        width: w,
-        height,
+        left: WIN.left,
+        top: WIN.top,
+        width: WIN.w,
+        height: WIN.h,
         overflow: "hidden",
         borderRadius: 10,
         border: `1px solid ${palette.border2}`,
@@ -121,20 +121,87 @@ const Screen: React.FC<{
         background: "#fff",
       }}
     >
-      <div style={{ width: "100%", height: "100%", transform: `scale(${z})`, transformOrigin: origin }}>
-        <OffthreadVideo
-          src={staticFile(src)}
-          startFrom={sec(startSec)}
-          playbackRate={rate}
-          muted
-          style={{ width: "100%", height: "100%", objectFit: "cover" }}
-        />
-      </div>
+      <OffthreadVideo
+        src={staticFile(src)}
+        startFrom={sec(startSec)}
+        playbackRate={rate}
+        muted
+        style={{ width: "100%", height: "100%", objectFit: "cover" }}
+      />
+      <Spotlight regions={regions} t={t} k={k} />
     </div>
   );
 };
 
+// Glide between consecutive regions over GLIDE seconds of recording time;
+// fade in at the first one.
+const GLIDE = 1.2;
+const Spotlight: React.FC<{ regions: Region[]; t: number; k: number }> = ({ regions, t, k }) => {
+  if (!regions.length || t < regions[0].at) return null;
+  let i = 0;
+  while (i + 1 < regions.length && regions[i + 1].at <= t) i++;
+  const cur = regions[i];
+  const prev = regions[i - 1] ?? cur;
+  const ease = (x: number) => 0.5 - 0.5 * Math.cos(Math.PI * Math.min(1, Math.max(0, x)));
+  const m = i === 0 ? 1 : ease((t - cur.at) / GLIDE);
+  const lerp = (a: number, b: number) => a + (b - a) * m;
+  const box = { x: lerp(prev.x, cur.x), y: lerp(prev.y, cur.y), w: lerp(prev.w, cur.w), h: lerp(prev.h, cur.h) };
+  const fadeIn = Math.min(1, (t - regions[0].at) / 0.8);
+  const labelOp = i === 0 ? fadeIn : interpolate(t - cur.at, [GLIDE * 0.6, GLIDE], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  // Label above the box, or tucked inside its top edge when there is no room;
+  // anchored to whichever side keeps it in the window.
+  const inside = box.y * k < 56;
+  const rightAnchored = (box.x + box.w / 2) * k > WIN.w / 2;
+  return (
+    <>
+      <div
+        style={{
+          position: "absolute",
+          left: box.x * k,
+          top: box.y * k,
+          width: box.w * k,
+          height: box.h * k,
+          borderRadius: 10,
+          border: `3px solid ${palette.accent}`,
+          boxShadow: `0 0 0 4000px rgba(8,8,8,${0.5 * fadeIn}), 0 0 28px rgba(245,215,110,0.55)`,
+          opacity: fadeIn,
+        }}
+      />
+      {cur.label && (
+        <div
+          style={{
+            position: "absolute",
+            ...(rightAnchored ? { right: WIN.w - (box.x + box.w) * k + (inside ? 10 : 0) } : { left: box.x * k + (inside ? 10 : 0) }),
+            top: inside ? box.y * k + 10 : box.y * k - 46,
+            fontFamily: type.mono,
+            fontSize: 20,
+            letterSpacing: "0.08em",
+            color: "#0a0a0a",
+            background: palette.accent,
+            padding: "6px 12px",
+            borderRadius: 6,
+            opacity: labelOp,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {cur.label}
+        </div>
+      )}
+    </>
+  );
+};
+
 // ---------------------------------------------------------------- scenes
+
+const pose = (shoulder_pan: number, shoulder_lift: number, elbow_flex: number, wrist_flex: number, wrist_roll: number, gripper: number): So101Pose => ({
+  shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll, gripper,
+});
+// Folded rest, a reach, and the calibration wizard's mid-range pose (all
+// joints at zero in the calibrated URDF).
+const REST = pose(0, -1.7, 1.6, 1.1, 0, 0);
+const REACH = pose(-0.5, -1.0, 1.4, 0.5, 0, 0.4);
+const MID = pose(0, 0, 0, 0, 0, 0);
+
 
 
 
@@ -144,15 +211,8 @@ const Title: React.FC = () => {
   const t = spring({ frame: frame - 6, fps: f, config: { damping: 200 } });
   return (
     <AbsoluteFill style={{ background: palette.bg0 }}>
-      <div style={{ position: "absolute", right: 60, top: 140, width: 900, height: 800, opacity: 0.95 }}>
-        <CalibrationStage
-          width={900}
-          height={800}
-          target={{ pan: -0.2, lift: -0.7, elbow: -0.4, wristFlex: 0.3, wristRoll: 0.2, gripper: 0.2 }}
-          start={{ pan: 0.6, lift: 0.3, elbow: -1.0, wristFlex: -0.4, wristRoll: -0.6, gripper: 0.4 }}
-          cameraPos={[6.2, 4.6, 9.4]}
-          lookAt={[0, 1.7, 0]}
-        />
+      <div style={{ position: "absolute", right: 60, top: 140, width: 900, height: 800, opacity: 0.95, maskImage: "radial-gradient(ellipse 50% 50% at 50% 50%, black 60%, transparent 100%)", WebkitMaskImage: "radial-gradient(ellipse 50% 50% at 50% 50%, black 60%, transparent 100%)" }}>
+        <So101Stage width={900} height={800} start={REST} target={REACH} showGhost={false} background={palette.bg0} cameraPos={[2.3, 1.6, 2.7]} lookAt={[0.35, 0.65, 0]} />
       </div>
       <div style={{ position: "absolute", left: 120, top: 360, opacity: t, transform: `translateY(${(1 - t) * 20}px)` }}>
         <div style={{ fontFamily: type.mono, fontSize: 26, letterSpacing: "0.4em", color: palette.accent }}>LAB CONSOLE · MCP · OPEN SOURCE</div>
@@ -176,7 +236,7 @@ const Pitch: React.FC = () => {
   ];
   return (
     <AbsoluteFill style={{ background: palette.bg0 }}>
-      <Marker text="the idea" />
+      <Marker text="the idea" top={60} />
       <div style={{ position: "absolute", left: 120, top: 250 }}>
         {items.map(([big, small], i) => {
           const t = spring({ frame: frame - 20 - i * 70, fps: f, config: { damping: 200 } });
@@ -196,7 +256,17 @@ const Console: React.FC = () => (
   <AbsoluteFill style={{ background: palette.bg0 }}>
     <Marker text="the console" />
     <Badge text="screen recording" />
-    <Screen src="launch/clips/console.webm" startSec={1} rate={2.1} zoom={2.1} origin="0% 22%" />
+    <Screen
+      src="launch/clips/console.webm"
+      startSec={1}
+      rate={2.5}
+      regions={[
+        { at: 2, x: 0, y: 104, w: 240, h: 172, label: "new experiment" },
+        { at: 14.2, x: 0, y: 100, w: 240, h: 240, label: "world templates" },
+        { at: 17.6, x: 700, y: 376, w: 522, h: 322, label: "new virtual world" },
+        { at: 24, x: 0, y: 690, w: 240, h: 296, label: "titration bench, ready" },
+      ]}
+    />
     <Line delay={6}>Create an experiment, spin up a virtual titration station.</Line>
   </AbsoluteFill>
 );
@@ -205,12 +275,16 @@ const Agent: React.FC = () => (
   <AbsoluteFill style={{ background: palette.bg0 }}>
     <Marker text="the agent" />
     <Badge text="screen recording · gpt-5.5" />
-    <Sequence durationInFrames={sec(5)}>
-      <Screen src="launch/clips/agent.webm" startSec={2.5} rate={1.6} zoom={3.4} origin="100% 100%" />
-    </Sequence>
-    <Sequence from={sec(5)}>
-      <Screen src="launch/clips/agent.webm" startSec={21} rate={2.4} zoom={3.4} origin="100% 8%" />
-    </Sequence>
+    <Screen
+      src="launch/clips/agent.webm"
+      startSec={4}
+      rate={2.8}
+      regions={[
+        { at: 4.5, x: 1562, y: 966, w: 356, h: 58, label: "ask in plain words" },
+        { at: 17.5, x: 1570, y: 112, w: 342, h: 262, label: "three tool calls" },
+        { at: 27.5, x: 1570, y: 380, w: 342, h: 520, label: "the arm, and what's on the bench" },
+      ]}
+    />
     <Line delay={6}>list_worlds → create_virtual_arm → list_virtual_entities</Line>
   </AbsoluteFill>
 );
@@ -219,7 +293,17 @@ const Editor: React.FC = () => (
   <AbsoluteFill style={{ background: palette.bg0 }}>
     <Marker text="worlds in 3d" />
     <Badge text="screen recording" />
-    <Screen src="launch/clips/editor.webm" startSec={1.5} rate={2.4} zoom={1.25} origin="45% 55%" />
+    <Screen
+      src="launch/clips/editor.webm"
+      startSec={1.5}
+      rate={2.1}
+      regions={[
+        { at: 2.5, x: 0, y: 36, w: 236, h: 1000, label: "toolbox" },
+        { at: 6.5, x: 660, y: 20, w: 920, h: 520, label: "SO-101, real URDF meshes" },
+        { at: 12.5, x: 0, y: 360, w: 236, h: 420, label: "glassware" },
+        { at: 17, x: 940, y: 560, w: 700, h: 360, label: "drag in, place, rotate" },
+      ]}
+    />
     <Line delay={6}>Drag in the arm and the glassware. Real URDF meshes, gizmos, collision checks.</Line>
   </AbsoluteFill>
 );
@@ -236,9 +320,9 @@ const Vision: React.FC = () => {
       {VISION.map((v, i) => {
         const local = frame - i * per;
         const op = interpolate(local, [-12, 0, per - 6, per + 6], [0, 1, 1, i === VISION.length - 1 ? 1 : 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
-        const s = interpolate(local, [0, per], [1.04, 1.12], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+        const s = interpolate(local, [0, per], [1.0, 1.04], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
         return (
-          <div key={v} style={{ position: "absolute", top: 130, left: 285, width: 1350, height: 760, overflow: "hidden", borderRadius: 10, opacity: op, border: `1px solid ${palette.border2}` }}>
+          <div key={v} style={{ position: "absolute", top: WIN.top, left: WIN.left, width: WIN.w, height: WIN.h, overflow: "hidden", borderRadius: 10, opacity: op, border: `1px solid ${palette.border2}` }}>
             <Img src={staticFile(`launch/vision/${v}.jpg`)} style={{ width: "100%", height: "100%", objectFit: "cover", transform: `scale(${s})`, transformOrigin: "20% 30%" }} />
           </div>
         );
@@ -252,15 +336,8 @@ const Calibration: React.FC = () => (
   <AbsoluteFill style={{ background: palette.bg0 }}>
     <Marker text="calibration" />
     <Badge text="animation" />
-    <div style={{ position: "absolute", left: 510, top: 130, width: 900, height: 800 }}>
-      <CalibrationStage
-        width={900}
-        height={800}
-        target={{ pan: 0, lift: -0.9, elbow: -0.2, wristFlex: 0.1, wristRoll: 0, gripper: 0 }}
-        start={{ pan: 0.5, lift: 0.4, elbow: -0.9, wristFlex: -0.35, wristRoll: -0.5, gripper: 0.3 }}
-        cameraPos={[6.2, 4.6, 9.4]}
-        lookAt={[0, 1.7, 0]}
-      />
+    <div style={{ position: "absolute", left: WIN.left, top: WIN.top, width: WIN.w, height: WIN.h, borderRadius: 10, overflow: "hidden" }}>
+      <So101Stage width={WIN.w} height={WIN.h} start={REST} target={MID} background={palette.bg0} cameraPos={[2.6, 1.7, 3.0]} lookAt={[0.5, 0.75, 0]} />
     </div>
     <Line delay={6}>A ghost setpoint, the live servo pose, six endpoints.</Line>
   </AbsoluteFill>
@@ -280,7 +357,7 @@ const Stack: React.FC = () => {
   const n = Math.min(84, Math.round(interpolate(frame, [10, 120], [0, 84], { extrapolateLeft: "clamp", extrapolateRight: "clamp" })));
   return (
     <AbsoluteFill style={{ background: palette.bg0 }}>
-      <Marker text="under the hood" />
+      <Marker text="under the hood" top={60} />
       <div style={{ position: "absolute", left: 120, top: 200, fontFamily: type.display, fontWeight: 800, fontSize: 200, color: palette.accent, letterSpacing: "-0.04em" }}>
         {n}
       </div>
